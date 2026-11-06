@@ -1,0 +1,4 @@
+# dsh-shenlan-whale bundle patch
+- insert:
+    - id: shenlan-whale
+      name: dsh-shenlan-whale

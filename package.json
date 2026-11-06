@@ -1,0 +1,79 @@
+{
+  "name": "dsh-shenlan-whale",
+  "version": "0.40.0",
+  "description": "深蓝鲸 —— 长在本地的人格体，通道可换，记忆不丢（DSH 插件）",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "qq",
+    "onebot",
+    "napcat",
+    "chatbot",
+    "persona"
+  ],
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "node tests/entry.test.mjs && node tests/host.test.mjs && node tests/whale-memory.test.mjs && node tests/say.test.mjs && node tests/style.test.mjs && node tests/log.test.mjs && node tests/journal.test.mjs && node tests/panel.test.mjs && node tests/panel-view.test.mjs && node tests/rules.test.mjs && node tests/taxonomy.test.mjs && node tests/chat.test.mjs && node tests/qqview.test.mjs && node tests/client.test.mjs && node tests/config.test.mjs && node tests/event.test.mjs && node tests/behavior.test.mjs && node tests/induction.test.mjs && node tests/evolve.test.mjs && node tests/skill.test.mjs && node tests/chain.test.mjs && node tests/guard.test.mjs && node tests/usage.test.mjs && node tests/tools.test.mjs && node tests/channel.test.mjs && node tests/napcat.test.mjs && node tests/napcat-probe.test.mjs && node tests/hardening.test.mjs && node tests/conn-stability.test.mjs && node tests/media.test.mjs && node tests/turn.test.mjs && node tests/typing.test.mjs && node tests/attention.test.mjs && node tests/approvals.test.mjs && node tests/activity.test.mjs && node tests/sandbox.test.mjs && node tests/coding.test.mjs && node tests/group-key.test.mjs && node tests/send-error.test.mjs && node tests/backfill.test.mjs && node scripts/check-identity.mjs && node scripts/check-copy.mjs && node scripts/check-layers.mjs",
+    "check": "node scripts/check-identity.mjs && node scripts/check-copy.mjs && node scripts/check-layers.mjs",
+    "probe": "node probes/probe8.mjs && node probes/probe9.mjs && node probes/probe10.mjs && node probes/probe11.mjs",
+    "audit:config": "node scripts/check-config-consumers.mjs",
+    "audit:dead": "node scripts/check-dead-code.mjs",
+    "bench": "node scripts/bench-panel.mjs",
+    "taxonomy": "node scripts/dump-taxonomy.mjs",
+    "test:host": "node tests/host.test.mjs",
+    "test:memory": "node tests/whale-memory.test.mjs",
+    "sync": "node scripts/sync-to-profile.mjs",
+    "check:sync": "node scripts/sync-to-profile.mjs --check",
+    "smoke": "node scripts/smoke-chain.mjs",
+    "reconcile": "node scripts/reconcile.mjs",
+    "board": "node scripts/changes-board.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "cordis.patch.yml",
+    "package.json",
+    "启动NapCat.bat",
+    "README.md",
+    "CONCEPTS.md",
+    "SCHEME.md",
+    "UX.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "author": {
+    "name": "深蓝鲸项目"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xwxw773-debug/W-x-x-W.git"
+  },
+  "homepage": "https://github.com/xwxw773-debug/W-x-x-W#readme",
+  "bugs": {
+    "url": "https://github.com/xwxw773-debug/W-x-x-W/issues"
+  }
+}
