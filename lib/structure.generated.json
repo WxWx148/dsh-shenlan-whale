@@ -1,0 +1,1975 @@
+{
+  "generatedAt": "2026-11-07T21:29:49.782Z",
+  "schema": 1,
+  "api": {
+    "base": "/api/shenlan",
+    "prefix": "/api/shenlan",
+    "routes": [
+      "/action",
+      "/asset/*",
+      "/chat",
+      "/config",
+      "/debug/run",
+      "/detail",
+      "/events",
+      "/list/*",
+      "/message",
+      "/napcat/login",
+      "/napcat/qr/refresh",
+      "/panel",
+      "/vision/selftest",
+      "/vision/test"
+    ]
+  },
+  "pages": [
+    {
+      "id": "overview",
+      "label": "总览",
+      "hint": "它现在怎么样、今天花了多少",
+      "icon": "pulse",
+      "domain": null
+    },
+    {
+      "id": "talk",
+      "label": "对话",
+      "hint": "直接跟它说话，或者看它在 QQ 上跟谁聊",
+      "icon": "chat",
+      "domain": "speech"
+    },
+    {
+      "id": "mind",
+      "label": "心智",
+      "hint": "记得什么、学到什么、能不能退回去",
+      "icon": "spark",
+      "domain": "cognition"
+    },
+    {
+      "id": "ability",
+      "label": "能力",
+      "hint": "会什么、被允许什么、被什么硬约束卡住",
+      "icon": "grid",
+      "domain": "capability"
+    },
+    {
+      "id": "channel",
+      "label": "连接",
+      "hint": "连上没有、怎么登录、协议端在哪",
+      "icon": "plug",
+      "domain": "runtime"
+    },
+    {
+      "id": "settings",
+      "label": "设置",
+      "hint": "能改的都列在这里，改不了的说清楚",
+      "icon": "sliders",
+      "domain": null
+    },
+    {
+      "id": "process",
+      "label": "诊断",
+      "hint": "跑了什么代码、改过什么、试一次",
+      "icon": "layers",
+      "domain": "runtime"
+    }
+  ],
+  "aliases": {
+    "usage": "overview",
+    "evolve": "mind",
+    "memory": "mind",
+    "rules": "ability",
+    "skills": "ability",
+    "connection": "channel"
+  },
+  "domains": [
+    {
+      "id": "identity",
+      "label": "身份",
+      "hint": "它是谁、怎么称呼、什么脾气",
+      "parents": [
+        "app",
+        "truth"
+      ]
+    },
+    {
+      "id": "speech",
+      "label": "表达",
+      "hint": "什么时候开口、说几条、群里怎么接话",
+      "parents": [
+        "voice",
+        "decide"
+      ]
+    },
+    {
+      "id": "cognition",
+      "label": "心智",
+      "hint": "记得什么、怎么学、会不会改自己",
+      "parents": [
+        "mind",
+        "facts"
+      ]
+    },
+    {
+      "id": "autonomy",
+      "label": "自主",
+      "hint": "没人叫的时候它自己做什么",
+      "parents": [
+        "life"
+      ]
+    },
+    {
+      "id": "capability",
+      "label": "能力",
+      "hint": "会什么、能调什么、能跑什么",
+      "parents": [
+        "ability"
+      ]
+    },
+    {
+      "id": "budget",
+      "label": "花费",
+      "hint": "花了多少、还剩多少",
+      "parents": [
+        "facts"
+      ]
+    },
+    {
+      "id": "runtime",
+      "label": "运行",
+      "hint": "怎么连上、出问题去哪看、面板长什么样",
+      "parents": [
+        "base",
+        "channel",
+        "view"
+      ]
+    }
+  ],
+  "parents": [
+    {
+      "id": "base",
+      "label": "底座",
+      "dir": "base",
+      "status": "landed",
+      "facade": null,
+      "desc": "日志、账本、文件、定时器",
+      "files": [
+        {
+          "file": "core.mjs",
+          "path": "base/core.mjs",
+          "dir": ".",
+          "lines": 160,
+          "exports": [
+            "DEFAULTS",
+            "backupCorrupt",
+            "loadConfig",
+            "openJournal",
+            "paths",
+            "quarantineIfCorrupt",
+            "readJson",
+            "saveConfig",
+            "writeJson"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "journal.mjs",
+          "path": "base/journal.mjs",
+          "dir": ".",
+          "lines": 493,
+          "exports": [
+            "Journal",
+            "decodeCursor",
+            "encodeCursor"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "log.mjs",
+          "path": "base/log.mjs",
+          "dir": ".",
+          "lines": 198,
+          "exports": [
+            "LEVELS",
+            "LEVEL_IDS",
+            "LEVEL_LABELS",
+            "NOISE_KINDS",
+            "auditFilter",
+            "auditVisible",
+            "isNoise",
+            "kindsPass",
+            "labelOf",
+            "levelPass",
+            "severityOf",
+            "tracePass"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "ticker.mjs",
+          "path": "base/ticker.mjs",
+          "dir": ".",
+          "lines": 108,
+          "exports": [
+            "createTicker"
+          ],
+          "via": "import"
+        }
+      ],
+      "exports": [
+        "DEFAULTS",
+        "Journal",
+        "LEVELS",
+        "LEVEL_IDS",
+        "LEVEL_LABELS",
+        "NOISE_KINDS",
+        "auditFilter",
+        "auditVisible",
+        "backupCorrupt",
+        "createTicker",
+        "decodeCursor",
+        "encodeCursor",
+        "isNoise",
+        "kindsPass",
+        "labelOf",
+        "levelPass",
+        "loadConfig",
+        "openJournal",
+        "paths",
+        "quarantineIfCorrupt",
+        "readJson",
+        "saveConfig",
+        "severityOf",
+        "tracePass",
+        "writeJson"
+      ]
+    },
+    {
+      "id": "channel",
+      "label": "通道",
+      "dir": "channel",
+      "status": "landed",
+      "facade": "index.mjs",
+      "desc": "OneBot 协议、NapCat 登录、掉线补回",
+      "files": [
+        {
+          "file": "backfill.mjs",
+          "path": "channel/backfill.mjs",
+          "dir": ".",
+          "lines": 176,
+          "exports": [
+            "backfillMissed"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "index.mjs",
+          "path": "channel/index.mjs",
+          "dir": ".",
+          "lines": 17,
+          "exports": [
+            "MODE_LABELS",
+            "NapCatLogin",
+            "OneBotChannel",
+            "ageText",
+            "backfillMissed",
+            "describeLogin",
+            "endpointOf",
+            "friendlySendError",
+            "installFromLauncher",
+            "napcatHash",
+            "passwordDigest",
+            "planLogin",
+            "probeTcp",
+            "qrPathOf",
+            "resolveInstall",
+            "toRaw",
+            "uinFromLauncher"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "napcat.mjs",
+          "path": "channel/napcat.mjs",
+          "dir": ".",
+          "lines": 1169,
+          "exports": [
+            "MODE_LABELS",
+            "NapCatLogin",
+            "ageText",
+            "describeLogin",
+            "endpointOf",
+            "installFromLauncher",
+            "napcatHash",
+            "passwordDigest",
+            "planLogin",
+            "probeTcp",
+            "qrPathOf",
+            "resolveInstall",
+            "uinFromLauncher"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "onebot.mjs",
+          "path": "channel/onebot.mjs",
+          "dir": ".",
+          "lines": 1211,
+          "exports": [
+            "OneBotChannel",
+            "friendlySendError",
+            "toRaw"
+          ],
+          "via": "import"
+        }
+      ],
+      "exports": [
+        "MODE_LABELS",
+        "NapCatLogin",
+        "OneBotChannel",
+        "ageText",
+        "backfillMissed",
+        "describeLogin",
+        "endpointOf",
+        "friendlySendError",
+        "installFromLauncher",
+        "napcatHash",
+        "passwordDigest",
+        "planLogin",
+        "probeTcp",
+        "qrPathOf",
+        "resolveInstall",
+        "toRaw",
+        "uinFromLauncher"
+      ]
+    },
+    {
+      "id": "voice",
+      "label": "表达",
+      "dir": "voice",
+      "status": "landed",
+      "facade": "index.mjs",
+      "desc": "成形、语气、断句、打字节奏",
+      "files": [
+        {
+          "file": "index.mjs",
+          "path": "voice/index.mjs",
+          "dir": ".",
+          "lines": 39,
+          "exports": [
+            "STICKY",
+            "STYLE_PROFILE",
+            "TYPING",
+            "TypingDesk",
+            "artifactNote",
+            "askCard",
+            "askText",
+            "canStart",
+            "card",
+            "explainError",
+            "findBreak",
+            "fmtMs",
+            "forQq",
+            "hardWrap",
+            "partGapMs",
+            "render",
+            "splitBursts",
+            "splitByMeaning",
+            "standsAlone",
+            "styleGuide",
+            "typingDelayMs",
+            "typingOnlyMs"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "say.mjs",
+          "path": "voice/say.mjs",
+          "dir": ".",
+          "lines": 240,
+          "exports": [
+            "artifactNote",
+            "askCard",
+            "askText",
+            "card",
+            "explainError",
+            "fmtMs",
+            "forQq",
+            "render"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "semantic.mjs",
+          "path": "voice/semantic.mjs",
+          "dir": ".",
+          "lines": 223,
+          "exports": [
+            "STICKY",
+            "canStart",
+            "findBreak",
+            "splitByMeaning",
+            "standsAlone"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "style.mjs",
+          "path": "voice/style.mjs",
+          "dir": ".",
+          "lines": 285,
+          "exports": [
+            "STYLE_PROFILE",
+            "hardWrap",
+            "splitBursts",
+            "styleGuide"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "typing.mjs",
+          "path": "voice/typing.mjs",
+          "dir": ".",
+          "lines": 436,
+          "exports": [
+            "TYPING",
+            "TypingDesk",
+            "partGapMs",
+            "typingDelayMs",
+            "typingOnlyMs"
+          ],
+          "via": "import"
+        }
+      ],
+      "exports": [
+        "STICKY",
+        "STYLE_PROFILE",
+        "TYPING",
+        "TypingDesk",
+        "artifactNote",
+        "askCard",
+        "askText",
+        "canStart",
+        "card",
+        "explainError",
+        "findBreak",
+        "fmtMs",
+        "forQq",
+        "hardWrap",
+        "partGapMs",
+        "render",
+        "splitBursts",
+        "splitByMeaning",
+        "standsAlone",
+        "styleGuide",
+        "typingDelayMs",
+        "typingOnlyMs"
+      ]
+    },
+    {
+      "id": "facts",
+      "label": "事实",
+      "dir": "facts",
+      "status": "landed",
+      "facade": "index.mjs",
+      "desc": "事件打标、用量；四本账仍在 runtime，见 facts/index.mjs 头注释",
+      "files": [
+        {
+          "file": "event.mjs",
+          "path": "facts/event.mjs",
+          "dir": ".",
+          "lines": 260,
+          "exports": [
+            "EventTagger",
+            "KIND",
+            "SCOPE",
+            "SOURCE",
+            "TAG",
+            "conversationOf",
+            "has",
+            "inWindow",
+            "kindOf",
+            "needsReply",
+            "parseWindow",
+            "repairGroupConversations"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "index.mjs",
+          "path": "facts/index.mjs",
+          "dir": ".",
+          "lines": 40,
+          "exports": [
+            "EventTagger",
+            "KIND",
+            "SCOPE",
+            "SOURCE",
+            "TAG",
+            "USAGE_SOURCES",
+            "Usage",
+            "conversationOf",
+            "has",
+            "inWindow",
+            "kindOf",
+            "needsReply",
+            "parseWindow",
+            "repairGroupConversations",
+            "splitUsage"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "usage.mjs",
+          "path": "facts/usage.mjs",
+          "dir": ".",
+          "lines": 463,
+          "exports": [
+            "USAGE_SOURCES",
+            "Usage",
+            "splitUsage"
+          ],
+          "via": "import"
+        }
+      ],
+      "exports": [
+        "EventTagger",
+        "KIND",
+        "SCOPE",
+        "SOURCE",
+        "TAG",
+        "USAGE_SOURCES",
+        "Usage",
+        "conversationOf",
+        "has",
+        "inWindow",
+        "kindOf",
+        "needsReply",
+        "parseWindow",
+        "repairGroupConversations",
+        "splitUsage"
+      ]
+    },
+    {
+      "id": "decide",
+      "label": "决定",
+      "dir": "decide",
+      "status": "landed",
+      "facade": "index.mjs",
+      "desc": "该不该说、说不说、出口闸门（含 guardPlan）",
+      "files": [
+        {
+          "file": "attention.mjs",
+          "path": "decide/attention.mjs",
+          "dir": ".",
+          "lines": 342,
+          "exports": [
+            "ATTENTION",
+            "AttentionDesk",
+            "addressesSelf",
+            "textOverlaps"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "behavior.mjs",
+          "path": "decide/behavior.mjs",
+          "dir": ".",
+          "lines": 206,
+          "exports": [
+            "BEHAVIOR",
+            "BEHAVIOR_LIST",
+            "TUNABLE_BEHAVIORS",
+            "record",
+            "route"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "burst.mjs",
+          "path": "decide/burst.mjs",
+          "dir": ".",
+          "lines": 244,
+          "exports": [
+            "BurstLedger",
+            "DEFAULT_MERGE_WINDOW_MS",
+            "MAX_MERGED",
+            "mergeTexts"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "cadence.mjs",
+          "path": "decide/cadence.mjs",
+          "dir": ".",
+          "lines": 174,
+          "exports": [
+            "Cadence",
+            "DEFAULT_MAX_GAP_MINUTES",
+            "DEFAULT_MIN_GAP_MINUTES",
+            "DEFAULT_SKIP_CHANCE",
+            "pickGapMs",
+            "shouldSpeak"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "dedupe.mjs",
+          "path": "decide/dedupe.mjs",
+          "dir": ".",
+          "lines": 265,
+          "exports": [
+            "DUP_MSG_MS",
+            "DUP_TEXT_MS",
+            "Dedupe",
+            "normalize",
+            "sameUtterance"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "guard.mjs",
+          "path": "decide/guard.mjs",
+          "dir": ".",
+          "lines": 265,
+          "exports": [
+            "Guard",
+            "MIN_DELAY_MS"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "index.mjs",
+          "path": "decide/index.mjs",
+          "dir": ".",
+          "lines": 78,
+          "exports": [
+            "ATTENTION",
+            "AttentionDesk",
+            "BEHAVIOR",
+            "BEHAVIOR_LIST",
+            "BurstLedger",
+            "Cadence",
+            "DEFAULT_MAX_GAP_MINUTES",
+            "DEFAULT_MERGE_WINDOW_MS",
+            "DEFAULT_MIN_GAP_MINUTES",
+            "DEFAULT_SKIP_CHANCE",
+            "DUP_MSG_MS",
+            "DUP_TEXT_MS",
+            "Dedupe",
+            "Guard",
+            "INTENTS",
+            "MAX_MERGED",
+            "MIN_DELAY_MS",
+            "TUNABLE_BEHAVIORS",
+            "addressesSelf",
+            "guardPlan",
+            "isSelfReferential",
+            "matchIntent",
+            "mergeTexts",
+            "normalize",
+            "pickGapMs",
+            "record",
+            "route",
+            "sameUtterance",
+            "shouldSpeak",
+            "skipWebSearch",
+            "textOverlaps"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "intent.mjs",
+          "path": "decide/intent.mjs",
+          "dir": ".",
+          "lines": 80,
+          "exports": [
+            "INTENTS",
+            "isSelfReferential",
+            "matchIntent",
+            "skipWebSearch"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "speech.mjs",
+          "path": "decide/speech.mjs",
+          "dir": ".",
+          "lines": 43,
+          "exports": [
+            "guardPlan"
+          ],
+          "via": "import"
+        }
+      ],
+      "exports": [
+        "ATTENTION",
+        "AttentionDesk",
+        "BEHAVIOR",
+        "BEHAVIOR_LIST",
+        "BurstLedger",
+        "Cadence",
+        "DEFAULT_MAX_GAP_MINUTES",
+        "DEFAULT_MERGE_WINDOW_MS",
+        "DEFAULT_MIN_GAP_MINUTES",
+        "DEFAULT_SKIP_CHANCE",
+        "DUP_MSG_MS",
+        "DUP_TEXT_MS",
+        "Dedupe",
+        "Guard",
+        "INTENTS",
+        "MAX_MERGED",
+        "MIN_DELAY_MS",
+        "TUNABLE_BEHAVIORS",
+        "addressesSelf",
+        "guardPlan",
+        "isSelfReferential",
+        "matchIntent",
+        "mergeTexts",
+        "normalize",
+        "pickGapMs",
+        "record",
+        "route",
+        "sameUtterance",
+        "shouldSpeak",
+        "skipWebSearch",
+        "textOverlaps"
+      ]
+    },
+    {
+      "id": "turn",
+      "label": "一轮",
+      "dir": "turn",
+      "status": "landed",
+      "facade": "index.mjs",
+      "desc": "理解、回忆、组装、生成、分条",
+      "files": [
+        {
+          "file": "index.mjs",
+          "path": "turn/index.mjs",
+          "dir": ".",
+          "lines": 2236,
+          "exports": [
+            "Turn",
+            "buildPrompt",
+            "needsFullTools",
+            "parseToolCall",
+            "parseToolCalls",
+            "splitReply",
+            "toolResultDigest"
+          ],
+          "via": "import"
+        }
+      ],
+      "exports": [
+        "Turn",
+        "buildPrompt",
+        "needsFullTools",
+        "parseToolCall",
+        "parseToolCalls",
+        "splitReply",
+        "toolResultDigest"
+      ]
+    },
+    {
+      "id": "mind",
+      "label": "心智",
+      "dir": "mind",
+      "status": "landed",
+      "facade": "index.mjs",
+      "desc": "记忆、人格、意愿、learn/（归纳、习惯、自查、权重、进化）",
+      "files": [
+        {
+          "file": "index.mjs",
+          "path": "mind/index.mjs",
+          "dir": ".",
+          "lines": 62,
+          "exports": [
+            "BOUNDS",
+            "CORE_SECTIONS",
+            "Evolver",
+            "HabitObserver",
+            "PersonaBook",
+            "SelfCheckBook",
+            "WhaleMemory",
+            "addWant",
+            "defaultWeights",
+            "deriveRewards",
+            "dropWant",
+            "gapLines",
+            "gaps",
+            "hasParticle",
+            "induce",
+            "isDeclining",
+            "isRefused",
+            "line",
+            "listWants",
+            "matchSection",
+            "measure",
+            "memoryCommand",
+            "normalizeWeights",
+            "observe",
+            "parseSections",
+            "readDefaultPersona",
+            "refuse",
+            "renderSections",
+            "resolveWant",
+            "splitGroups",
+            "wantStats",
+            "weightLabel"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "memory.mjs",
+          "path": "mind/memory.mjs",
+          "dir": ".",
+          "lines": 601,
+          "exports": [
+            "WhaleMemory",
+            "memoryCommand"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "persona.mjs",
+          "path": "mind/persona.mjs",
+          "dir": ".",
+          "lines": 431,
+          "exports": [
+            "CORE_SECTIONS",
+            "PersonaBook",
+            "matchSection",
+            "parseSections",
+            "readDefaultPersona",
+            "renderSections"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "refusals.mjs",
+          "path": "mind/refusals.mjs",
+          "dir": ".",
+          "lines": 63,
+          "exports": [
+            "isRefused",
+            "refuse"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "wants.mjs",
+          "path": "mind/wants.mjs",
+          "dir": ".",
+          "lines": 120,
+          "exports": [
+            "addWant",
+            "dropWant",
+            "listWants",
+            "resolveWant",
+            "wantStats"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "learn/evolve.mjs",
+          "path": "mind/learn/evolve.mjs",
+          "dir": "learn",
+          "lines": 408,
+          "exports": [
+            "BEHAVIOR",
+            "Evolver"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "learn/habits.mjs",
+          "path": "mind/learn/habits.mjs",
+          "dir": "learn",
+          "lines": 385,
+          "exports": [
+            "HabitObserver",
+            "gapLines",
+            "gaps",
+            "hasParticle",
+            "measure",
+            "observe",
+            "splitGroups"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "learn/induction.mjs",
+          "path": "mind/learn/induction.mjs",
+          "dir": "learn",
+          "lines": 181,
+          "exports": [
+            "deriveRewards",
+            "induce",
+            "isDeclining",
+            "line"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "learn/selfcheck.mjs",
+          "path": "mind/learn/selfcheck.mjs",
+          "dir": "learn",
+          "lines": 119,
+          "exports": [
+            "SelfCheckBook"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "learn/weights.mjs",
+          "path": "mind/learn/weights.mjs",
+          "dir": "learn",
+          "lines": 116,
+          "exports": [
+            "BOUNDS",
+            "clampNumber",
+            "cloneWeights",
+            "defaultWeights",
+            "normalizeWeights",
+            "stepClamp",
+            "weightLabel"
+          ],
+          "via": "import"
+        }
+      ],
+      "exports": [
+        "BOUNDS",
+        "CORE_SECTIONS",
+        "Evolver",
+        "HabitObserver",
+        "PersonaBook",
+        "SelfCheckBook",
+        "WhaleMemory",
+        "addWant",
+        "defaultWeights",
+        "deriveRewards",
+        "dropWant",
+        "gapLines",
+        "gaps",
+        "hasParticle",
+        "induce",
+        "isDeclining",
+        "isRefused",
+        "line",
+        "listWants",
+        "matchSection",
+        "measure",
+        "memoryCommand",
+        "normalizeWeights",
+        "observe",
+        "parseSections",
+        "readDefaultPersona",
+        "refuse",
+        "renderSections",
+        "resolveWant",
+        "splitGroups",
+        "wantStats",
+        "weightLabel"
+      ]
+    },
+    {
+      "id": "ability",
+      "label": "能力",
+      "dir": "ability",
+      "status": "landed",
+      "facade": "index.mjs",
+      "desc": "技能、工具、沙箱、审批、编码、媒体、联网；依赖由装配层注入（tools/ exec/ media/ 仍平铺）",
+      "files": [
+        {
+          "file": "approvals.mjs",
+          "path": "ability/approvals.mjs",
+          "dir": ".",
+          "lines": 439,
+          "exports": [
+            "ApprovalDesk",
+            "approvalText"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "browser.mjs",
+          "path": "ability/browser.mjs",
+          "dir": ".",
+          "lines": 443,
+          "exports": [
+            "clickIndex",
+            "closeSession",
+            "formatPage",
+            "historyAction",
+            "openUrl",
+            "readCurrent",
+            "screenshot",
+            "scrollPage",
+            "typeInto",
+            "uploadFile"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "cdp.mjs",
+          "path": "ability/cdp.mjs",
+          "dir": ".",
+          "lines": 242,
+          "exports": [
+            "CdpSession",
+            "closeTarget",
+            "findBrowser",
+            "freePort",
+            "killTree",
+            "launchBrowser",
+            "newTarget",
+            "waitForDevTools"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "coding.mjs",
+          "path": "ability/coding.mjs",
+          "dir": ".",
+          "lines": 511,
+          "exports": [
+            "LIMITS",
+            "describe",
+            "isProtected",
+            "listTree",
+            "readSource",
+            "resolveInside",
+            "restoreBackup",
+            "rootOf",
+            "runCommand",
+            "searchSource",
+            "writeSource"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "forward.mjs",
+          "path": "ability/forward.mjs",
+          "dir": ".",
+          "lines": 172,
+          "exports": [
+            "FORWARD_READING_RULE",
+            "digestForward"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "index.mjs",
+          "path": "ability/index.mjs",
+          "dir": ".",
+          "lines": 125,
+          "exports": [
+            "ApprovalDesk",
+            "CATALOG",
+            "CODING_LIMITS",
+            "CdpSession",
+            "FORWARD_READING_RULE",
+            "LIMITS",
+            "MASTERY",
+            "SKILL_GROUPS",
+            "SOURCE",
+            "STATE",
+            "Sandbox",
+            "SkillBook",
+            "allToolNames",
+            "approvalText",
+            "attachImages",
+            "bindWeights",
+            "blockedTools",
+            "brief",
+            "calc",
+            "checkNet",
+            "clickIndex",
+            "closeSession",
+            "closeTarget",
+            "configureNet",
+            "createTools",
+            "describe",
+            "digestForward",
+            "extOf",
+            "fetchImageBytes",
+            "findBrowser",
+            "formatPage",
+            "freePort",
+            "historyAction",
+            "implementedTools",
+            "isProtected",
+            "killTree",
+            "lastNetDenied",
+            "launchBrowser",
+            "lineOf",
+            "listStickers",
+            "listTree",
+            "loadStickers",
+            "looksBroken",
+            "masteryOf",
+            "mediaDir",
+            "mediaPath",
+            "missingImpl",
+            "netStatus",
+            "newTarget",
+            "normalizeQuery",
+            "openUrl",
+            "persistImage",
+            "pickSticker",
+            "promptLineOf",
+            "pruneMedia",
+            "readCurrent",
+            "readSource",
+            "readWeb",
+            "registerTools",
+            "resolveInside",
+            "resolveNeeds",
+            "resolveSticker",
+            "restoreBackup",
+            "rootOf",
+            "runCommand",
+            "runnerPlan",
+            "saveImageBytes",
+            "saveSticker",
+            "screenshot",
+            "scrollPage",
+            "searchSource",
+            "searchWeb",
+            "searchWebDetailed",
+            "skillIdOfTool",
+            "stateOf",
+            "toolOwners",
+            "toolsAllowed",
+            "typeInto",
+            "uploadFile",
+            "usageSourceOfTool",
+            "waitForDevTools",
+            "writeSource"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "media.mjs",
+          "path": "ability/media.mjs",
+          "dir": ".",
+          "lines": 243,
+          "exports": [
+            "attachImages",
+            "extOf",
+            "fetchImageBytes",
+            "mediaDir",
+            "mediaPath",
+            "persistImage",
+            "pruneMedia",
+            "saveImageBytes"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "sandbox.mjs",
+          "path": "ability/sandbox.mjs",
+          "dir": ".",
+          "lines": 688,
+          "exports": [
+            "Sandbox",
+            "runnerPlan"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "skill.mjs",
+          "path": "ability/skill.mjs",
+          "dir": ".",
+          "lines": 938,
+          "exports": [
+            "CATALOG",
+            "LIMITS",
+            "MASTERY",
+            "SKILL_GROUPS",
+            "SOURCE",
+            "STATE",
+            "SkillBook",
+            "allToolNames",
+            "bindWeights",
+            "blockedTools",
+            "brief",
+            "implementedTools",
+            "lineOf",
+            "looksBroken",
+            "masteryOf",
+            "missingImpl",
+            "promptLineOf",
+            "registerTools",
+            "resolveNeeds",
+            "skillIdOfTool",
+            "stateOf",
+            "toolOwners",
+            "toolsAllowed"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "stickers.mjs",
+          "path": "ability/stickers.mjs",
+          "dir": ".",
+          "lines": 300,
+          "exports": [
+            "listStickers",
+            "loadStickers",
+            "pickSticker",
+            "resolveSticker",
+            "saveSticker"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "tools.mjs",
+          "path": "ability/tools.mjs",
+          "dir": ".",
+          "lines": 1744,
+          "exports": [
+            "calc",
+            "createTools",
+            "usageSourceOfTool"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "web.mjs",
+          "path": "ability/web.mjs",
+          "dir": ".",
+          "lines": 355,
+          "exports": [
+            "checkNet",
+            "configureNet",
+            "lastNetDenied",
+            "netStatus",
+            "normalizeQuery",
+            "readWeb",
+            "searchWeb",
+            "searchWebDetailed"
+          ],
+          "via": "import"
+        }
+      ],
+      "exports": [
+        "ApprovalDesk",
+        "CATALOG",
+        "CODING_LIMITS",
+        "CdpSession",
+        "FORWARD_READING_RULE",
+        "LIMITS",
+        "MASTERY",
+        "SKILL_GROUPS",
+        "SOURCE",
+        "STATE",
+        "Sandbox",
+        "SkillBook",
+        "allToolNames",
+        "approvalText",
+        "attachImages",
+        "bindWeights",
+        "blockedTools",
+        "brief",
+        "calc",
+        "checkNet",
+        "clickIndex",
+        "closeSession",
+        "closeTarget",
+        "configureNet",
+        "createTools",
+        "describe",
+        "digestForward",
+        "extOf",
+        "fetchImageBytes",
+        "findBrowser",
+        "formatPage",
+        "freePort",
+        "historyAction",
+        "implementedTools",
+        "isProtected",
+        "killTree",
+        "lastNetDenied",
+        "launchBrowser",
+        "lineOf",
+        "listStickers",
+        "listTree",
+        "loadStickers",
+        "looksBroken",
+        "masteryOf",
+        "mediaDir",
+        "mediaPath",
+        "missingImpl",
+        "netStatus",
+        "newTarget",
+        "normalizeQuery",
+        "openUrl",
+        "persistImage",
+        "pickSticker",
+        "promptLineOf",
+        "pruneMedia",
+        "readCurrent",
+        "readSource",
+        "readWeb",
+        "registerTools",
+        "resolveInside",
+        "resolveNeeds",
+        "resolveSticker",
+        "restoreBackup",
+        "rootOf",
+        "runCommand",
+        "runnerPlan",
+        "saveImageBytes",
+        "saveSticker",
+        "screenshot",
+        "scrollPage",
+        "searchSource",
+        "searchWeb",
+        "searchWebDetailed",
+        "skillIdOfTool",
+        "stateOf",
+        "toolOwners",
+        "toolsAllowed",
+        "typeInto",
+        "uploadFile",
+        "usageSourceOfTool",
+        "waitForDevTools",
+        "writeSource"
+      ]
+    },
+    {
+      "id": "life",
+      "label": "自主",
+      "dir": "life",
+      "status": "landed",
+      "facade": "index.mjs",
+      "desc": "活动、提醒、活动账本（meter 即 activity-usage.mjs）",
+      "files": [
+        {
+          "file": "activity-usage.mjs",
+          "path": "life/activity-usage.mjs",
+          "dir": ".",
+          "lines": 237,
+          "exports": [
+            "ACTIVITY_KINDS",
+            "activitySpend",
+            "activityUsageView",
+            "meterOf",
+            "usageOf"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "activity.mjs",
+          "path": "life/activity.mjs",
+          "dir": ".",
+          "lines": 192,
+          "exports": [
+            "runActivityStep"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "index.mjs",
+          "path": "life/index.mjs",
+          "dir": ".",
+          "lines": 37,
+          "exports": [
+            "ACTIVITY_KINDS",
+            "Reminders",
+            "activitySpend",
+            "activityUsageView",
+            "cnNumber",
+            "describeAt",
+            "meterOf",
+            "parseReminder",
+            "parseWhen",
+            "runActivityStep",
+            "usageOf"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "reminders.mjs",
+          "path": "life/reminders.mjs",
+          "dir": ".",
+          "lines": 360,
+          "exports": [
+            "Reminders",
+            "cnNumber",
+            "describeAt",
+            "parseReminder",
+            "parseWhen"
+          ],
+          "via": "import"
+        }
+      ],
+      "exports": [
+        "ACTIVITY_KINDS",
+        "Reminders",
+        "activitySpend",
+        "activityUsageView",
+        "cnNumber",
+        "describeAt",
+        "meterOf",
+        "parseReminder",
+        "parseWhen",
+        "runActivityStep",
+        "usageOf"
+      ]
+    },
+    {
+      "id": "view",
+      "label": "视图",
+      "dir": "view",
+      "status": "landed",
+      "facade": "index.mjs",
+      "desc": "面板载荷、模块卡、会话视图、诊断、列表（client.panel.js 未搬）",
+      "files": [
+        {
+          "file": "debug.mjs",
+          "path": "view/debug.mjs",
+          "dir": ".",
+          "lines": 220,
+          "exports": [
+            "DEBUG_ITEMS",
+            "runDebug"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "index.mjs",
+          "path": "view/index.mjs",
+          "dir": ".",
+          "lines": 52,
+          "exports": [
+            "CARD_PARTS",
+            "DEBUG_ITEMS",
+            "LIST_KINDS",
+            "PAGE_CARDS",
+            "SIDEBAR",
+            "THREAD_PAGE_SIZE",
+            "agoText",
+            "channelFace",
+            "countText",
+            "detailView",
+            "listConversations",
+            "listOf",
+            "moneyText",
+            "overviewOf",
+            "panelView",
+            "peerOf",
+            "rateText",
+            "runDebug",
+            "skillFace",
+            "spanText",
+            "thread",
+            "withUnit"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "list-view.mjs",
+          "path": "view/list-view.mjs",
+          "dir": ".",
+          "lines": 105,
+          "exports": [
+            "LIST_KINDS",
+            "listOf"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "panel-view.mjs",
+          "path": "view/panel-view.mjs",
+          "dir": ".",
+          "lines": 2319,
+          "exports": [
+            "CARD_PARTS",
+            "PAGE_CARDS",
+            "REGIONS",
+            "SIDEBAR",
+            "agoText",
+            "channelFace",
+            "countText",
+            "detailView",
+            "moneyText",
+            "panelView",
+            "rateText",
+            "skillFace",
+            "spanText",
+            "withUnit"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "qqview.mjs",
+          "path": "view/qqview.mjs",
+          "dir": ".",
+          "lines": 232,
+          "exports": [
+            "THREAD_PAGE_SIZE",
+            "listConversations",
+            "overviewOf",
+            "peerOf",
+            "thread"
+          ],
+          "via": "import"
+        }
+      ],
+      "exports": [
+        "CARD_PARTS",
+        "DEBUG_ITEMS",
+        "LIST_KINDS",
+        "PAGE_CARDS",
+        "SIDEBAR",
+        "THREAD_PAGE_SIZE",
+        "agoText",
+        "channelFace",
+        "countText",
+        "detailView",
+        "listConversations",
+        "listOf",
+        "moneyText",
+        "overviewOf",
+        "panelView",
+        "peerOf",
+        "rateText",
+        "runDebug",
+        "skillFace",
+        "spanText",
+        "thread",
+        "withUnit"
+      ]
+    },
+    {
+      "id": "truth",
+      "label": "真源",
+      "dir": "truth",
+      "status": "landed",
+      "facade": "index.mjs",
+      "desc": "配置形状、面板清单、概念地图、自述口径、manifest 三投影、对账清单",
+      "files": [
+        {
+          "file": "audit.mjs",
+          "path": "truth/audit.mjs",
+          "dir": ".",
+          "lines": 140,
+          "exports": [
+            "AUDITS",
+            "auditOf",
+            "auditSummary"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "capabilities.mjs",
+          "path": "truth/capabilities.mjs",
+          "dir": ".",
+          "lines": 118,
+          "exports": [
+            "CAPABILITY_RULE",
+            "CORRECTION_RULE",
+            "PROGRESS_WORDS",
+            "SELF_CHECK_RULE",
+            "VISIBILITY",
+            "capabilityBrief"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "config.mjs",
+          "path": "truth/config.mjs",
+          "dir": ".",
+          "lines": 415,
+          "exports": [
+            "DEFAULTS",
+            "applyInto",
+            "clone",
+            "defaultKeys",
+            "diff",
+            "flatten",
+            "get",
+            "migrate",
+            "report",
+            "set",
+            "unflatten"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "index.mjs",
+          "path": "truth/index.mjs",
+          "dir": ".",
+          "lines": 104,
+          "exports": [
+            "AUDITS",
+            "CAPABILITY_RULE",
+            "CORRECTION_RULE",
+            "DEFAULTS",
+            "DETAIL_KINDS",
+            "DETAIL_KIND_LIST",
+            "DOMAINS",
+            "DOMAIN_IDS",
+            "LEVEL",
+            "MANIFEST_SCHEMA",
+            "NAV_SECTIONS",
+            "PANEL_GROUPS",
+            "PANEL_ITEMS",
+            "PENDING_KEYS",
+            "PROGRESS_WORDS",
+            "REGIONS",
+            "REGION_IDS",
+            "RISK",
+            "SELF_CHECK_RULE",
+            "VISIBILITY",
+            "applyInto",
+            "auditOf",
+            "auditSummary",
+            "capabilityBrief",
+            "clone",
+            "coverage",
+            "defaultKeys",
+            "describe",
+            "diff",
+            "domainLabel",
+            "editable",
+            "find",
+            "flatten",
+            "get",
+            "isPending",
+            "itemsOf",
+            "manifest",
+            "manifestCheck",
+            "manifestData",
+            "manifestDerive",
+            "migrate",
+            "needsConfirm",
+            "needsRestart",
+            "optionLabelsOf",
+            "readonlyItems",
+            "regionOfDetail",
+            "report",
+            "set",
+            "summary",
+            "unflatten",
+            "validate"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "manifest.mjs",
+          "path": "truth/manifest.mjs",
+          "dir": ".",
+          "lines": 161,
+          "exports": [
+            "MANIFEST_SCHEMA",
+            "manifest",
+            "manifestCheck",
+            "manifestData",
+            "manifestDerive"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "panel.mjs",
+          "path": "truth/panel.mjs",
+          "dir": ".",
+          "lines": 649,
+          "exports": [
+            "LEVEL",
+            "PANEL_GROUPS",
+            "PANEL_ITEMS",
+            "PENDING_KEYS",
+            "RISK",
+            "coverage",
+            "describe",
+            "editable",
+            "find",
+            "isPending",
+            "itemsOf",
+            "needsConfirm",
+            "needsRestart",
+            "optionLabelsOf",
+            "readonlyItems",
+            "summary",
+            "validate"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "taxonomy.mjs",
+          "path": "truth/taxonomy.mjs",
+          "dir": ".",
+          "lines": 132,
+          "exports": [
+            "DETAIL_KINDS",
+            "DETAIL_KIND_LIST",
+            "DOMAINS",
+            "DOMAIN_IDS",
+            "NAV_SECTIONS",
+            "REGIONS",
+            "REGION_IDS",
+            "domainLabel",
+            "regionOfDetail"
+          ],
+          "via": "import"
+        }
+      ],
+      "exports": [
+        "AUDITS",
+        "CAPABILITY_RULE",
+        "CORRECTION_RULE",
+        "DEFAULTS",
+        "DETAIL_KINDS",
+        "DETAIL_KIND_LIST",
+        "DOMAINS",
+        "DOMAIN_IDS",
+        "LEVEL",
+        "MANIFEST_SCHEMA",
+        "NAV_SECTIONS",
+        "PANEL_GROUPS",
+        "PANEL_ITEMS",
+        "PENDING_KEYS",
+        "PROGRESS_WORDS",
+        "REGIONS",
+        "REGION_IDS",
+        "RISK",
+        "SELF_CHECK_RULE",
+        "VISIBILITY",
+        "applyInto",
+        "auditOf",
+        "auditSummary",
+        "capabilityBrief",
+        "clone",
+        "coverage",
+        "defaultKeys",
+        "describe",
+        "diff",
+        "domainLabel",
+        "editable",
+        "find",
+        "flatten",
+        "get",
+        "isPending",
+        "itemsOf",
+        "manifest",
+        "manifestCheck",
+        "manifestData",
+        "manifestDerive",
+        "migrate",
+        "needsConfirm",
+        "needsRestart",
+        "optionLabelsOf",
+        "readonlyItems",
+        "regionOfDetail",
+        "report",
+        "set",
+        "summary",
+        "unflatten",
+        "validate"
+      ]
+    },
+    {
+      "id": "app",
+      "label": "装配",
+      "dir": "app",
+      "status": "landed",
+      "facade": "index.mjs",
+      "desc": "路由、出站、定时任务",
+      "files": [
+        {
+          "file": "action.mjs",
+          "path": "app/action.mjs",
+          "dir": ".",
+          "lines": 163,
+          "exports": [
+            "ACTION_OPS",
+            "runAction"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "asset.mjs",
+          "path": "app/asset.mjs",
+          "dir": ".",
+          "lines": 66,
+          "exports": [
+            "ASSET_KINDS",
+            "assetOf"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "build-info.mjs",
+          "path": "app/build-info.mjs",
+          "dir": ".",
+          "lines": 212,
+          "exports": [
+            "SELF_DIR",
+            "brokenImports",
+            "buildInfo",
+            "runtimeFingerprint",
+            "sourceDirOf"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "chat.mjs",
+          "path": "app/chat.mjs",
+          "dir": ".",
+          "lines": 289,
+          "exports": [
+            "Chat"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "events.mjs",
+          "path": "app/events.mjs",
+          "dir": ".",
+          "lines": 93,
+          "exports": [
+            "createEventHub",
+            "eventKeyOf"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "failure.mjs",
+          "path": "app/failure.mjs",
+          "dir": ".",
+          "lines": 169,
+          "exports": [
+            "FAILURES",
+            "FAILURE_CODES",
+            "failure",
+            "failureFrom",
+            "normalizeFailure"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "host.mjs",
+          "path": "app/host.mjs",
+          "dir": ".",
+          "lines": 214,
+          "exports": [
+            "cleanReply",
+            "createHostRunner",
+            "resolveModel",
+            "sessionIdOf",
+            "workspaceOf"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "index.mjs",
+          "path": "app/index.mjs",
+          "dir": ".",
+          "lines": 63,
+          "exports": [
+            "ACTION_OPS",
+            "ASSET_KINDS",
+            "Chat",
+            "FAILURES",
+            "FAILURE_CODES",
+            "Runtime",
+            "SELF_DIR",
+            "assetOf",
+            "brokenImports",
+            "buildInfo",
+            "cleanReply",
+            "createEventHub",
+            "createHostRunner",
+            "eventKeyOf",
+            "failure",
+            "failureFrom",
+            "normalizeFailure",
+            "resolveModel",
+            "runAction",
+            "runtimeFingerprint",
+            "sessionIdOf",
+            "sourceDirOf",
+            "workspaceOf"
+          ],
+          "via": "import"
+        },
+        {
+          "file": "runtime.mjs",
+          "path": "app/runtime.mjs",
+          "dir": ".",
+          "lines": 1571,
+          "exports": [
+            "RISK",
+            "Runtime"
+          ],
+          "via": "import"
+        }
+      ],
+      "exports": [
+        "ACTION_OPS",
+        "ASSET_KINDS",
+        "Chat",
+        "FAILURES",
+        "FAILURE_CODES",
+        "Runtime",
+        "SELF_DIR",
+        "assetOf",
+        "brokenImports",
+        "buildInfo",
+        "cleanReply",
+        "createEventHub",
+        "createHostRunner",
+        "eventKeyOf",
+        "failure",
+        "failureFrom",
+        "normalizeFailure",
+        "resolveModel",
+        "runAction",
+        "runtimeFingerprint",
+        "sessionIdOf",
+        "sourceDirOf",
+        "workspaceOf"
+      ]
+    }
+  ],
+  "flat": {
+    "dir": "lib",
+    "modules": [
+      {
+        "file": "client.panel.js",
+        "path": "lib/client.panel.js",
+        "dir": ".",
+        "lines": 3428,
+        "exports": [],
+        "via": "regex"
+      },
+      {
+        "file": "rules.mjs",
+        "path": "lib/rules.mjs",
+        "dir": ".",
+        "lines": 339,
+        "exports": [
+          "GAPS",
+          "RULES",
+          "RULE_GROUPS",
+          "ruleGroupLabel",
+          "rulesOf"
+        ],
+        "via": "import"
+      }
+    ]
+  },
+  "stats": {
+    "parentsLanded": 12,
+    "parentsPlanned": 0,
+    "files": 76,
+    "lines": 31865,
+    "pages": 7,
+    "routes": 14,
+    "flatModules": 2,
+    "exports": 343
+  },
+  "problems": []
+}
