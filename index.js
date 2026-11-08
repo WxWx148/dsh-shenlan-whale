@@ -1229,25 +1229,37 @@ export function apply(ctx) {
     /**
      * 主人的「同意 / 拒绝」回话 → 一次决定。返回 true 表示这条已经被吃掉。
      *
-     * 三个条件缺一不可：有正在等的请求、是私聊、来自主人。
-     * 少一个就交给正常聊天 —— 否则主人在群里随口一句「同意」会被当成授权。
+     * 三个条件缺一不可：有正在等的请求、来自主人、且是私聊或
+     * **发起请求的那个群**。群聊里只认本群的 pending，别处挂着的代码
+     * 请求不能被一句「同意」顺手放行。
      */
     const takeApprovalReply = (raw) => {
       const desk = sandbox.approvals
       if (!desk || typeof desk.takeReply !== 'function' || !desk.list().length) return false
-      if (raw?.kind !== KIND.MESSAGE || raw?.scope !== SCOPE.PRIVATE) return false
+      if (raw?.kind !== KIND.MESSAGE) return false
+      const isPrivate = raw.scope === SCOPE.PRIVATE
+      const isGroup = raw.scope === SCOPE.GROUP
+      if (!isPrivate && !isGroup) return false
       const owner = String(runtime.config.identity?.ownerId || '')
       if (!owner || String(raw.from || '') !== owner) return false
-      const verdict = desk.takeReply(raw.text)
+      const verdict = desk.takeReply(raw.text, { origin: isGroup ? String(raw.conversation || '') : '' })
       if (!verdict) return false
       // 事件照样落盘：主人在对话里确实说了这句，记录里不该凭空少一条
       try {
         const decision = runtime.decide(raw, { config: runtime.config })
         runtime.logEvent(decision.event, { approval: 'reply' })
       } catch {}
-      outbound('private', owner, verdict.message, { system: true }).catch((error) => {
-        log('[whale] 确认回执没发出去：' + String(error?.message || error))
-      })
+      const targetScope = isGroup ? SCOPE.GROUP : SCOPE.PRIVATE
+      const targetId = isGroup
+        ? String(raw.payload?.groupId || raw.group || '')
+        : owner
+      if (targetId) {
+        outbound(targetScope, targetId, verdict.message, { system: true }).catch((error) => {
+          log('[whale] 确认回执没发出去：' + String(error?.message || error))
+        })
+      } else {
+        outbound('private', owner, verdict.message, { system: true }).catch(() => {})
+      }
       return true
     }
     channel.onRaw = (raw) => {

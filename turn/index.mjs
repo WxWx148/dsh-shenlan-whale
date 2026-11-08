@@ -324,7 +324,7 @@ function nowText(at = Date.now()) {
  * 判定刻意放宽：宁可多给全表，也不要把一件能做的事判成闲聊。
  * 只有纯问候、语气词、表情、笑声这类没有任何动作含义的短句才走闲聊档。
  */
-const FULL_TOOL_WORDS = /(查|搜|找|看|读|写|记|提醒|发|画|图|代码|文件|帮我|给我|能不能|会不会|怎么|如何|什么|啥|哪|谁|多少|天气|新闻|翻译|算|运行|执行|打开|设置|改|删|加|列表|状态|记忆|群|说|讲|解释|总结|推荐|对比|活动|说说|空间|头像|表情|教|学|听|语音|@)/i
+const FULL_TOOL_WORDS = /(查|搜|找|看|读|写|记|提醒|发|画|图|代码|文件|帮我|给我|能不能|会不会|怎么|如何|什么|啥|哪|谁|多少|天气|新闻|翻译|算|运行|执行|打开|设置|改|修|戳|沙箱|源码|权限|配置|删|加|列表|状态|记忆|群|说|讲|解释|总结|推荐|对比|活动|说说|空间|头像|表情|教|学|听|语音|@)/i
 
 export function needsFullTools(text) {
   const value = String(text || '').trim()
@@ -350,6 +350,7 @@ export function buildPrompt(input = {}) {
   const capabilityLine = String(input.capabilityLine || '').trim()
   const intentRule = String(input.intentRule || '').trim()
   const emptyAt = input.emptyAt === true
+  const isPoke = input.poke === true
   const selfName = String(persona.name || '深蓝')
   const selfId = String(input.selfId || '').trim()
   const at = Number(input.at) || Date.now()
@@ -389,6 +390,7 @@ export function buildPrompt(input = {}) {
   staticLines.push('要真的 @ 人必须用 at_person 工具；在正文里手写“@名字”不会变成真 @，尤其不要 @ 自己。')
   staticLines.push('说错了要撤回，用 withdraw_message：只能撤自己 2 分钟内、当前会话最近一条；不能撤别人的、旧消息或跨会话消息。想演示“发一句再撤”，传 {"next":true}，系统会在这一条发出后自动撤回。')
   staticLines.push('撤回可以由你自己判断：发现自己刚说错、重复、发错话，直接调用 withdraw_message，不用等主人开口；边界仍以工具校验为准。')
+  staticLines.push('没看懂、缺关键信息，或者不确定对方在接哪个话头时，允许直接反问一句，问清具体缺什么；不要为了显得会聊就硬猜，更不要拿别人的旧话题顶上。')
   staticLines.push('直接回一句话，不要解释你在做什么。')
   staticLines.push('如果这句话配表情更自然，可以在末尾加 [表情:标签]；不确定就不加。')
   // 「发小黄脸」关掉时，这一行不能再出现：提示词教了一条走不通的路，
@@ -540,8 +542,13 @@ export function buildPrompt(input = {}) {
   const whoId = String(event.from || '')
   const whoLabel = who + (whoId && whoId !== 'self' ? `（QQ ${whoId}）` : '')
   dynamicLines.push('')
+  if (whoLabel) {
+    dynamicLines.push(`现在回的是 ${whoLabel} 这条；先接这条和它最近的上下文，不要拿更早的别人的话题替代。`)
+  }
   if (emptyAt) {
-    dynamicLines.push(`${whoLabel || '对方'}只 @ 了你，没打字。结合上面的对话接一句自然的话，别问「怎么了」，也别复述刚才的话。`)
+    dynamicLines.push(isPoke
+      ? `${whoLabel || '对方'}戳了你一下，没配文字。把它当成一次空 @：结合上面的对话接一句自然的话；如果确实不知道要接哪件事，可以具体问一句，不要只问「怎么了」，也别复述刚才的话。`
+      : `${whoLabel || '对方'}只 @ 了你，没打字。结合上面的对话接一句自然的话；如果确实不知道要接哪件事，可以具体问一句，不要只问「怎么了」，也别复述刚才的话。`)
   } else {
     dynamicLines.push(who ? `${whoLabel}说：${defuse(event.payload?.text || '')}` : `对方说：${defuse(event.payload?.text || '')}`)
   }
@@ -1574,8 +1581,11 @@ export class Turn {
       try {
         const page = await readWeb(link)
         if (page.ok) search = [`${page.title ? page.title + '：' : ''}${page.text}`]
-        // 白名单没放行时不能让模型「没读到就凭印象编」：把真实原因交给它照直说。
-        else if (page.code === 'net_denied') netNotice = `这条链接没能打开：${page.error}。`
+        // 没读到就是没读到：把真实原因交给模型照直说，别让它把网络超时
+        // 猜成「仓库私有 / 空仓库」。
+        else {
+          netNotice = `这条链接没能打开：${page.error || '未知原因'}。不要猜链接里的内容，也不要判断仓库是私有还是空的；如实告诉用户没读到，并给可执行的下一步。`
+        }
       } catch {}
     }
     if (!search.length && !skipWebSearch(userText) && /(搜一下|搜索|查一下|查查|最新|新闻|天气|发生什么)/.test(userText)) {
@@ -1678,7 +1688,32 @@ export class Turn {
     }
 
     let vision = ''
-    const images = [...(event.payload?.images || []), ...(quote?.images || [])].slice(0, Math.max(1, Number(this.runtime.config.images?.maxPerMessage) || 2))
+    let images = [...(event.payload?.images || []), ...(quote?.images || [])].slice(0, Math.max(1, Number(this.runtime.config.images?.maxPerMessage) || 2))
+    // 图片经常单独发一条，下一句才说“你看这个/绷得住吗”。
+    // 只在当前消息没有图时，回看同一会话最近 5 分钟里的一张图；
+    // 否则模型只能看到文字，就会去接上一条别人的话题。
+    let recentImageLabel = ''
+    if (!images.length && typeof this.runtime.describeImageFile === 'function' && this.runtime.events?.read) {
+      try {
+        const rows = this.runtime.events.read({
+          limit: 30,
+          maxScan: 1000,
+          filter: (row) => row?.id !== event.id
+            && row?.conversation === event.conversation
+            && Number(row?.at) >= Number(event.at || at) - 5 * 60_000
+            && Number(row?.at) <= Number(event.at || at)
+            && ((Array.isArray(row?.images) && row.images.length)
+              || (Array.isArray(row?.payload?.images) && row.payload.images.length)),
+        })?.rows || []
+        rows.sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0))
+        const latest = rows[0]
+        const pic = latest?.images?.[0] || latest?.payload?.images?.[0]
+        if (pic) {
+          images = [pic]
+          recentImageLabel = String(latest.sender || latest.from || '对方')
+        }
+      } catch {}
+    }
     if (images.length && typeof this.runtime.describeImageFile === 'function') {
       const parts = []
       for (const image of images) {
@@ -1693,6 +1728,7 @@ export class Turn {
         }
       }
       vision = parts.map((text, index) => `图${index + 1}：${text}`).join('\n')
+      if (vision && recentImageLabel) vision = `上一条消息（${recentImageLabel}发）的图：\n${vision}`
     }
     // 合并转发里的图片不在 event.payload.images 里；不读的话模型只看到
     // 一行「[图片]」，就会回「看不到图」。取前两张，连同发送者一起给视觉模型。
@@ -1729,6 +1765,9 @@ export class Turn {
     // 所以技能开关必须在**这里**再判一次，否则关掉照样发得出去。
     const allowFace = this.#allows('send_face')
     const allowSticker = this.#allows('send_sticker')
+    const isPokeEvent = event.kind === 'notice'
+      && event.payload?.notice === 'poke'
+      && event.payload?.pokeMe === true
     let prompt = buildPrompt({
       event,
       selfId: String(this.channel?.selfId || this.runtime.config.channel?.selfId || ''),
@@ -1750,7 +1789,8 @@ export class Turn {
       forwardTruncated: forwardAll.forwardTruncated === true,
       forwardFailed,
       files,
-      emptyAt: event.tags?.includes('at_me') && !userText && !(event.payload?.images || []).length && !files.length,
+      emptyAt: isPokeEvent || (event.tags?.includes('at_me') && !userText && !(event.payload?.images || []).length && !files.length),
+      poke: isPokeEvent,
       // 闲聊只列常用工具，动作类消息给全表：见 needsFullTools 的取舍说明。
       toolLine: this.tools && typeof this.tools.prompt === 'function'
         ? this.tools.prompt({ mode: intent || needsFullTools(userText) ? 'full' : 'chat' })

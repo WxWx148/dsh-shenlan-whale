@@ -131,7 +131,9 @@ await check('戳一戳与入群申请不再被丢掉：翻成通知，带齐后�
   // 以前这两类事件在这里就被 return null 吞了，系统里查不到任何痕迹。
   const poke = toRaw({ post_type: 'notice', notice_type: 'notify', sub_type: 'poke', user_id: 20002, time: 1 })
   assert.equal(poke.kind, KIND.NOTICE)
-  assert.equal(poke.payload.notice, 'notify')
+  assert.equal(poke.payload.notice, 'poke')
+  assert.equal(poke.payload.subType, 'poke')
+  assert.equal(poke.payload.pokeMe, true, '空 target 也按戳自己处理')
   assert.equal(poke.from, '20002')
 
   const ask = toRaw({ post_type: 'request', flag: 'f-1', sub_type: 'group', group_id: 30001, user_id: 20002, comment: '拉你进群', time: 1 })

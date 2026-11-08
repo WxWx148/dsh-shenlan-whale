@@ -248,7 +248,7 @@ await check('跑命令：cwd 只能在插件目录里，超时会被掐掉而不
   rmSync(root, { recursive: true, force: true })
 })
 
-await check('工具档位：off 连看都不给看，read 能看不能改', () => {
+await check('工具档位：off 连看都不给看，read 能看不能改', async () => {
   const root = makeRoot()
   const backupDir = mkdtempSync(path.join(tmpdir(), 'whale-tools-'))
   const build = (codeMode) => createTools({ sourceRoot: root, dir: backupDir, runtime: { dir: backupDir, config: { sandbox: { codeMode } }, log: () => {} } })
@@ -256,12 +256,12 @@ await check('工具档位：off 连看都不给看，read 能看不能改', () =
   const off = build('off')
   assert.equal(off.call('code_read', { path: 'lib/demo.mjs' }).code, 'code_off')
   assert.equal(off.call('code_search', { keyword: 'alpha' }).code, 'code_off')
-  assert.equal(off.call('code_write', { path: 'lib/x.mjs', content: 'x' }).code, 'code_off')
+  assert.equal((await off.call('code_write', { path: 'lib/x.mjs', content: 'x' })).code, 'code_off')
 
   const read = build('read')
   assert.equal(read.call('code_read', { path: 'lib/demo.mjs' }).ok, true)
   assert.equal(read.call('code_search', { keyword: 'alpha' }).ok, true)
-  const denied = read.call('code_write', { path: 'lib/demo.mjs', content: 'export const hacked = 1\n' })
+  const denied = await read.call('code_write', { path: 'lib/demo.mjs', content: 'export const hacked = 1\n' })
   assert.equal(denied.ok, false)
   assert.equal(denied.code, 'code_readonly')
   assert.equal(readFileSync(path.join(root, 'lib', 'demo.mjs'), 'utf8').includes('hacked'), false, '拒了就不能落盘')
@@ -269,7 +269,7 @@ await check('工具档位：off 连看都不给看，read 能看不能改', () =
   rmSync(backupDir, { recursive: true, force: true })
 })
 
-await check('工具层：write 档通过 tools.call 走完整一条链路（含备份审计）', () => {
+await check('工具层：write 档通过 tools.call 走完整一条链路（含备份审计）', async () => {
   const root = makeRoot()
   const dataDir = mkdtempSync(path.join(tmpdir(), 'whale-tools-'))
   const logs = []
@@ -280,7 +280,7 @@ await check('工具层：write 档通过 tools.call 走完整一条链路（含�
   assert.equal(tools.has('run_command'), true)
   assert.equal(tools.label('code_write'), '改代码')
 
-  const done = tools.call('code_write', { path: 'lib/demo.mjs', content: 'export const alpha = 7\n' })
+  const done = await tools.call('code_write', { path: 'lib/demo.mjs', content: 'export const alpha = 7\n' })
   assert.equal(done.ok, true, done.error)
   assert.equal(readFileSync(path.join(root, 'lib', 'demo.mjs'), 'utf8'), 'export const alpha = 7\n')
   assert.ok(existsSync(path.join(dataDir, 'backups', 'code')), '备份落在数据目录下，不脏源码树')
@@ -290,7 +290,7 @@ await check('工具层：write 档通过 tools.call 走完整一条链路（含�
   rmSync(dataDir, { recursive: true, force: true })
 })
 
-await check('草稿纸（area=work）：写进去的东西留在工作区，不落在源码树里', () => {
+await check('草稿纸（area=work）：写进去的东西留在工作区，不落在源码树里', async () => {
   const root = makeRoot()
   const dataDir = mkdtempSync(path.join(tmpdir(), 'whale-work-'))
   const runtime = { dir: dataDir, config: { sandbox: { codeMode: 'write' } }, log: () => {} }
@@ -299,7 +299,7 @@ await check('草稿纸（area=work）：写进去的东西留在工作区，不�
 
   assert.ok(existsSync(workDir), '工具表接上就要有地方放东西')
 
-  const done = tools.call('code_write', { area: 'work', path: 'scratch.mjs', content: 'console.log(1)\n' })
+  const done = await tools.call('code_write', { area: 'work', path: 'scratch.mjs', content: 'console.log(1)\n' })
   assert.equal(done.ok, true, done.error)
   assert.equal(readFileSync(path.join(workDir, 'scratch.mjs'), 'utf8'), 'console.log(1)\n')
   assert.equal(existsSync(path.join(root, 'scratch.mjs')), false, '草稿写进源码树里就污染了')
@@ -317,7 +317,7 @@ await check('草稿纸（area=work）：写进去的东西留在工作区，不�
   assert.equal(sourceSide.ok, true)
   assert.match(sourceSide.text, /lib\/demo\.mjs/)
 
-  const escaped = tools.call('code_write', { area: 'work', path: '../escape.mjs', content: 'x' })
+  const escaped = await tools.call('code_write', { area: 'work', path: '../escape.mjs', content: 'x' })
   assert.equal(escaped.ok, false)
   assert.equal(escaped.code, 'outside', '草稿纸也有边界，不是法外之地')
   rmSync(root, { recursive: true, force: true })

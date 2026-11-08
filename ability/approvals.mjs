@@ -61,8 +61,12 @@ export function approvalText(snapshot = {}) {
   const more = snapshot.truncated === true || lines.length > 12
   const plan = Array.isArray(snapshot.plan) && snapshot.plan.length ? `\n步骤：${snapshot.plan.join(' → ')}` : ''
   const multi = Number(snapshot.waiting) > 1 ? `\n现在共 ${snapshot.waiting} 条在等，本条编号 ${snapshot.ref}；回复时请带上编号。` : ''
+  const action = snapshot.kind === 'code_write' ? '想改一处代码'
+    : snapshot.kind === 'code_restore' ? '想还原一处代码'
+      : snapshot.kind === 'run_command' ? '想跑一条命令'
+        : '想跑一段代码'
   return [
-    `【${project}】想跑一段代码，等你点头`,
+    `【${project}】${action}，等你点头`,
     '',
     `项目：${project}`,
     `目的：${purpose}${plan}`,
@@ -214,6 +218,9 @@ export class ApprovalDesk {
         label,
         project,
         purpose,
+        // 请求来自哪个会话：群聊里主人回「同意」时，只认这一条，
+        // 不能把别处挂着的代码请求一起放行。
+        origin: String(input.origin || ''),
         at,
         expiresAt,
         timer: null,
@@ -267,7 +274,7 @@ export class ApprovalDesk {
    * 只认「同意 / 批准 / 拒绝 / 不同意」开头这几种。「行」「可以」不算 ——
    * 那几个词在闲聊里太常见，一旦吃掉一条正常消息，用户只会觉得「它突然听不懂话了」。
    */
-  takeReply(text) {
+  takeReply(text, options = {}) {
     const raw = String(text || '').trim()
     if (!raw) return null
     const allow = /^(同意|批准)(?:\s|$|[,，。:：])/u.test(raw)
@@ -278,7 +285,13 @@ export class ApprovalDesk {
     if (!this.pending.size) return null
     const tail = raw.replace(/^(同意|批准|拒绝|不同意)/u, '').trim()
     const reason = deny ? tail.slice(0, MAX_REASON) : ''
-    const list = [...this.pending.values()].sort((a, b) => a.at - b.at)
+    const origin = String(options.origin || '')
+    let list = [...this.pending.values()].sort((a, b) => a.at - b.at)
+    if (origin) {
+      list = list.filter((one) => !one.origin || one.origin === origin)
+      // 这个群没有等待项：不要吃掉「同意」，让它走正常聊天。
+      if (!list.length) return null
+    }
     let target = null
     if (list.length === 1) target = list[0]
     // 多条在等时，必须带编号（取 id 末四位），否则不知道该点哪一条。

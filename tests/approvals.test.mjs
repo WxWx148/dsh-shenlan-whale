@@ -192,6 +192,16 @@ await check('在 QQ 里回「同意」= 一次决定；回别的话不拦', asyn
   rmSync(dir, { recursive: true, force: true })
 })
 
+await check('群聊里回「同意」：只认发起请求的那个群', async () => {
+  const { desk, dir } = makeDesk()
+  const pending = desk.request({ code: 'console.log(1)', origin: 'group:g1' })
+  assert.equal(desk.takeReply('同意', { origin: 'group:g2' }), null, '别的群不能顺手放行')
+  const verdict = desk.takeReply('同意', { origin: 'group:g1' })
+  assert.equal(verdict.allowed, true)
+  assert.equal((await pending).allowed, true)
+  rmSync(dir, { recursive: true, force: true })
+})
+
 await check('回「拒绝 理由」：理由进日志，也进给模型的下一句话', async () => {
   const { desk, dir } = makeDesk()
   const pending = ask(desk)

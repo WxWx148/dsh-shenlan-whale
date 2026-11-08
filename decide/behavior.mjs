@@ -82,7 +82,15 @@ const MESSAGE_KINDS = new Set([KIND.MESSAGE, KIND.IMAGE])
 export function route(event, ctx = {}) {
   if (!event) return { behavior: null, trigger: 'no_event', reason: '没有事件' }
 
-  // 1. 只看不做的：进事件流就够了
+  // 1. 戳一戳：不是「空消息」，是对方主动点了一下，按空 @ 对待。
+  // 参考实现的边界也一样：只回戳自己的，戳别人不接。
+  if (event.kind === KIND.NOTICE && event.payload?.notice === 'poke') {
+    if (event.payload?.pokeMe === true) {
+      return { behavior: BEHAVIOR.REPLY, trigger: 'poke', reason: '被戳了一下' }
+    }
+    return { behavior: null, trigger: 'poke_other', reason: '戳的不是我，不回' }
+  }
+  // 2. 其它通知/心跳：进事件流就够了
   if (event.kind === KIND.NOTICE || event.kind === KIND.HEARTBEAT) {
     return { behavior: null, trigger: 'observe_only', reason: '通知与心跳只记录' }
   }

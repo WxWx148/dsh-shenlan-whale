@@ -172,9 +172,16 @@ export function toRaw(ev, options = {}) {
   // 主人只能自己去 QQ 里发现。通道层的职责只是翻译，翻不翻得全，直接决定后面
   // 有没有这条数据可判；判不判由 behavior 决定（通知一律只记录，不产生行为）。
   if (postType === 'notice') {
-    const notice = String(ev.notice_type || ev.sub_type || '')
+    const noticeType = String(ev.notice_type || '')
+    const subType = String(ev.sub_type || '')
+    // 戳一戳在 OneBot v11 里是 notice_type=notify + sub_type=poke。
+    // 只取 notice_type 会把 poke 冲成 notify，后面永远分不出来。
+    const notice = noticeType === 'notify' && subType === 'poke'
+      ? 'poke'
+      : String(noticeType || subType || '')
     // 没有类型的通知是脏包，不是「未知事件」—— 放进去只会在事件流里堆无意义的行
     if (!notice) return null
+    const targetId = ev.target_id === undefined ? '' : String(ev.target_id)
     return {
       source: SOURCE.CHANNEL,
       kind: KIND.NOTICE,
@@ -184,9 +191,12 @@ export function toRaw(ev, options = {}) {
       at: Number(ev.time) * 1000 || Date.now(),
       payload: {
         notice,
+        subType,
+        // 只回应「戳的是我」；空 target 按协议端没给目标处理（参考实现也放行）。
+        pokeMe: notice === 'poke' && (!targetId || !selfId || targetId === selfId),
         groupId: ev.group_id === undefined ? null : ev.group_id,
         operatorId: ev.operator_id === undefined ? null : String(ev.operator_id),
-        targetId: ev.target_id === undefined ? null : String(ev.target_id),
+        targetId: targetId || null,
       },
     }
   }

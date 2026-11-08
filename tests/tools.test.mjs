@@ -220,6 +220,34 @@ await check('撤回：next:true 只登记下一条，不立刻撤已有消息', 
   }
 })
 
+await check('改代码：先问我档会先弹确认，群聊要求也不例外', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'whale-tool-ask-'))
+  try {
+    const runtime = fakeRuntime(dir)
+    runtime.config.sandbox = { mode: 'ask', codeMode: 'write' }
+    let asked = 0
+    runtime.sandbox = {
+      approvals: {
+        request: async (input) => {
+          asked += 1
+          assert.match(input.purpose, /群聊 12345/)
+          assert.match(input.purpose, /群友/)
+          assert.equal(input.origin, 'group:12345')
+          return { allowed: false, reason: '主人拒绝了' }
+        },
+      },
+    }
+    const tools = createTools({ ...deps, runtime, channel: {} })
+    const event = { scope: 'group', from: '42', conversation: 'group:12345', payload: { senderName: '群友', groupId: '12345' } }
+    const out = await tools.call('code_write', { path: 'decide/behavior.mjs', content: 'x' }, { event })
+    assert.equal(out.ok, false)
+    assert.match(out.error, /主人拒绝/)
+    assert.equal(asked, 1)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 await check('@人：不能 @ 自己，1000000001 是深蓝自己的号', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'whale-tool-at-self-'))
   try {

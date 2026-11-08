@@ -369,6 +369,7 @@ export class Sandbox {
         project: String(input.project || this.projectName),
         // 目的优先用调用方给的；没给就退到 label / 第一步计划 —— 三者都是人话
         purpose: String(input.purpose || input.label || planned.plan[0] || '跑一段代码'),
+        origin: String(input.origin || ''),
       })
       if (!verdict.allowed) {
         // 四种拒绝各有各的说法：模型看到的下一句话决定它会不会立刻重试

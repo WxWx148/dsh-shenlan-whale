@@ -159,22 +159,50 @@ export async function readWeb(url, maxChars = 3500) {
   if (!/^https?:\/\//i.test(target)) return { ok: false, error: '不是 http(s) 链接' }
   const gate = checkNet(target)
   if (!gate.ok) return { ok: false, code: gate.code, error: gate.error }
+  const host = (() => { try { return new URL(target).hostname.toLowerCase() } catch { return '' } })()
+  // GitHub 在这台机器上几乎每次直连都超时，先走代理，省掉 12 秒空等。
+  if (/(^|\.)github\.com$|(^|\.)githubusercontent\.com$/.test(host)) {
+    const proxied = await proxyText(target, 15_000)
+    if (proxied) return { ...pageOf(proxied, target, maxChars), viaProxy: true }
+  }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 12000)
+  let directError = ''
   try {
     const res = await fetch(target, { headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }, signal: controller.signal })
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
-    const body = await readCapped(res, MAX_BODY_BYTES)
-    if (!body.ok) return { ok: false, error: body.error }
-    const html = body.text
-    const title = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || ''
-    const text = strip(html).slice(0, Math.max(500, Number(maxChars) || 3500))
-    return { ok: true, title: strip(title).slice(0, 120), text, url: target }
+    if (!res.ok) {
+      directError = `HTTP ${res.status}`
+    } else {
+      const body = await readCapped(res, MAX_BODY_BYTES)
+      if (!body.ok) return { ok: false, error: body.error }
+      return pageOf(body.text, target, maxChars)
+    }
   } catch (error) {
-    return { ok: false, error: String((error && error.message) || error) }
+    directError = String((error && error.message) || error)
   } finally {
     clearTimeout(timer)
   }
+  // GitHub、部分境外站点在主进程直连会超时，但系统代理是通的。
+  // 直连失败后走与搜索同一套 --use-env-proxy 子进程，避免把「网络没通」
+  // 误判成「仓库私有 / 空仓库」。
+  const proxied = await proxyText(target, 15_000)
+  if (proxied) {
+    const page = pageOf(proxied, target, maxChars)
+    return { ...page, viaProxy: true }
+  }
+  return {
+    ok: false,
+    error: directError
+      ? `直连失败（${directError}），系统代理也没能打开这个页面`
+      : '系统代理也没能打开这个页面',
+  }
+}
+
+/** 统一从 HTML 里取标题与正文，直连/代理两条路共用 */
+function pageOf(html, target, maxChars = 3500) {
+  const title = (String(html).match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || ''
+  const text = strip(html).slice(0, Math.max(500, Number(maxChars) || 3500))
+  return { ok: true, title: strip(title).slice(0, 120), text, url: target }
 }
 
 /** 把口语化请求压成搜索词；保留引号和 site:，不破坏精确检索 */

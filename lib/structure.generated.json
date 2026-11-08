@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-08T13:26:37.241Z",
+  "generatedAt": "2026-11-08T16:17:35.780Z",
   "schema": 1,
   "api": {
     "base": "/api/shenlan",
@@ -312,7 +312,7 @@
           "file": "onebot.mjs",
           "path": "channel/onebot.mjs",
           "dir": ".",
-          "lines": 1274,
+          "lines": 1284,
           "exports": [
             "OneBotChannel",
             "friendlySendError",
@@ -573,7 +573,7 @@
           "file": "behavior.mjs",
           "path": "decide/behavior.mjs",
           "dir": ".",
-          "lines": 212,
+          "lines": 220,
           "exports": [
             "BEHAVIOR",
             "BEHAVIOR_LIST",
@@ -746,7 +746,7 @@
           "file": "index.mjs",
           "path": "turn/index.mjs",
           "dir": ".",
-          "lines": 2375,
+          "lines": 2415,
           "exports": [
             "Turn",
             "buildPrompt",
@@ -983,7 +983,7 @@
           "file": "approvals.mjs",
           "path": "ability/approvals.mjs",
           "dir": ".",
-          "lines": 439,
+          "lines": 452,
           "exports": [
             "ApprovalDesk",
             "approvalText"
@@ -1169,7 +1169,7 @@
           "file": "sandbox.mjs",
           "path": "ability/sandbox.mjs",
           "dir": ".",
-          "lines": 688,
+          "lines": 689,
           "exports": [
             "Sandbox",
             "runnerPlan"
@@ -1226,7 +1226,7 @@
           "file": "tools.mjs",
           "path": "ability/tools.mjs",
           "dir": ".",
-          "lines": 1887,
+          "lines": 1944,
           "exports": [
             "calc",
             "createTools",
@@ -1238,7 +1238,7 @@
           "file": "web.mjs",
           "path": "ability/web.mjs",
           "dir": ".",
-          "lines": 429,
+          "lines": 457,
           "exports": [
             "checkNet",
             "configureNet",
@@ -1942,7 +1942,7 @@
         "file": "client.panel.js",
         "path": "lib/client.panel.js",
         "dir": ".",
-        "lines": 3545,
+        "lines": 3570,
         "exports": [],
         "via": "regex"
       },
@@ -1966,7 +1966,7 @@
     "parentsLanded": 12,
     "parentsPlanned": 0,
     "files": 76,
-    "lines": 32588,
+    "lines": 32782,
     "pages": 7,
     "routes": 14,
     "flatModules": 2,

@@ -621,7 +621,7 @@ export function createTools(input = {}) {
 
   // 沙箱不在这里实现：闸门、预算、熔断、隔离全在 lib/sandbox.mjs，
   // 这一行只负责「把一段代码交给执行器，再把结果翻译成工具结果」。
-  add('exec_sandbox', async (args = {}) => {
+  add('exec_sandbox', async (args = {}, ctx = {}) => {
     const sandbox = runtime?.sandbox
     if (!sandbox || typeof sandbox.run !== 'function') {
       return { ok: false, error: '执行器没有接上本次运行', code: 'not_wired' }
@@ -630,6 +630,7 @@ export function createTools(input = {}) {
       code: String(args.code || ''),
       plan: args.plan,
       label: String(args.label || ''),
+      origin: String(ctx.event?.conversation || ''),
     })
     return result.ok
       ? { ok: true, text: result.text, data: result.data || {} }
@@ -750,6 +751,40 @@ export function createTools(input = {}) {
       : { ok: false, code: 'code_readonly', error: MODE_TEXT.read }
   }
 
+  /**
+   * 「先问我」档对所有会改东西/跑命令的路径都生效。
+   * 以前只有 exec_sandbox 走 ApprovalDesk，code_write / run_command 直接执行 ——
+   * 面板写着「每次都要点头」，实际上改源码、跑命令一次都没问过。
+   * 群聊里别人提的要求也走这里：确认请求发到主人私聊，不发给群。
+   */
+  const askForCode = async (kind, input = {}, ctx = {}) => {
+    if (String(runtime?.config?.sandbox?.mode || 'free') !== 'ask') return null
+    const desk = runtime?.sandbox?.approvals
+    if (!desk || typeof desk.request !== 'function') {
+      return { ok: false, code: 'sandbox_denied', error: '沙箱确认台没接上，先不执行' }
+    }
+    const event = ctx.event || {}
+    const gid = String(event.payload?.groupId || event.group || '')
+    const where = event.scope === 'group' ? `群聊 ${gid}`.trim() : '私聊'
+    const who = event.payload?.senderName || event.from || ''
+    // 私人确认里要能一眼看出「哪个群、谁提的」，否则主人不知道在授权什么。
+    const purpose = `${where}${who ? ' ' + who : ''}要求：${String(input.purpose || '动代码')}`
+    const verdict = await desk.request({
+      kind,
+      code: String(input.code || '').slice(0, 1600),
+      plan: Array.isArray(input.plan) ? input.plan : [],
+      label: String(input.label || purpose).slice(0, 120),
+      purpose,
+      project: String(runtime?.config?.identity?.name || '深蓝鲸'),
+      origin: String(event.conversation || ''),
+    })
+    if (verdict?.allowed) return null
+    if (verdict?.timedOut) {
+      return { ok: false, code: 'sandbox_denied', error: `等了 ${Math.round(Number(runtime?.config?.sandbox?.confirmSeconds) || 60)} 秒没人确认，按拒绝处理` }
+    }
+    return { ok: false, code: 'sandbox_denied', error: String(verdict?.reason || '主人没有同意这次代码操作') }
+  }
+
   add('code_list', (args = {}) => {
     const gate = readGate(codeMode())
     return gate || listTree(areaRoot(args), args)
@@ -765,9 +800,16 @@ export function createTools(input = {}) {
     return gate || searchSource(areaRoot(args), args)
   })
 
-  add('code_write', (args = {}) => {
+  add('code_write', async (args = {}, ctx = {}) => {
     const gate = writeGate(codeMode())
     if (gate) return gate
+    const approval = await askForCode('code_write', {
+      code: String(args.content || ''),
+      purpose: `改源码 ${String(args.path || '')}`,
+      plan: [`改 ${String(args.path || '文件')}`],
+      label: `改源码：${String(args.path || '')}`,
+    }, ctx)
+    if (approval) return approval
     const result = writeSource(areaRoot(args), { ...args, backupDir: backupRoot })
     // 每一次落笔都留痕：改了哪个文件、多少字节、有没有动保护名单。
     // 事后要能把「它到底动了什么」回答出来，这是让自主成立的前提。
@@ -781,17 +823,32 @@ export function createTools(input = {}) {
     return result
   })
 
-  add('code_restore', (args = {}) => {
+  add('code_restore', async (args = {}, ctx = {}) => {
     const gate = writeGate(codeMode())
     if (gate) return gate
+    const approval = await askForCode('code_restore', {
+      purpose: `还原源码 ${String(args.path || '')}`,
+      plan: [`还原 ${String(args.path || '文件')}`],
+      label: `还原源码：${String(args.path || '')}`,
+    }, ctx)
+    if (approval) return approval
     const result = restoreBackup(codeRoot, { ...args, backupDir: backupRoot })
     runtime?.log?.('code_restore', { file: result.data?.path || String(args.path || ''), ok: result.ok === true })
     return result
   })
 
-  add('run_command', (args = {}) => {
+  add('run_command', async (args = {}, ctx = {}) => {
     const gate = writeGate(codeMode())
     if (gate) return gate
+    const bin = String(args.bin || args.command || '').trim()
+    const argv = Array.isArray(args.args) ? args.args.map(String) : []
+    const approval = await askForCode('run_command', {
+      code: [bin, ...argv].join(' '),
+      purpose: `跑命令 ${bin}`,
+      plan: [`执行 ${bin} ${argv.join(' ')}`.trim()],
+      label: `跑命令：${bin}`,
+    }, ctx)
+    if (approval) return approval
     return runCommand(areaRoot(args), args)
   })
 
