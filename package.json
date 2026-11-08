@@ -3,8 +3,17 @@
   "version": "0.46.0",
   "description": "深蓝鲸 —— 长在本地的人格体，通道可换，记忆不丢",
   "type": "module",
-  "private": true,
   "main": "index.js",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "qq",
+    "onebot",
+    "napcat",
+    "chatbot",
+    "persona"
+  ],
   "scripts": {
     "test": "node tests/all.mjs",
     "check": "node scripts/check-identity.mjs && node scripts/check-copy.mjs && node scripts/check-layers.mjs && node scripts/check-ui.mjs",
@@ -76,6 +85,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "local"
+    "url": "git+https://github.com/WxWx148/W-x-x-W.git"
+  },
+  "homepage": "https://github.com/WxWx148/W-x-x-W#readme",
+  "bugs": {
+    "url": "https://github.com/WxWx148/W-x-x-W/issues"
   }
 }

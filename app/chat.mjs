@@ -164,7 +164,23 @@ export class Chat {
 
     this.busy = true
     const at = this.now()
+    // 先取历史，再落当前这句。反过来的话，刚落盘的当前消息会被 #recent 当成
+    // 「刚才的对话」再读一次，buildPrompt 末尾又会把本句作为用户输入写一遍 ——
+    // 模型看到的同一句话出现两次，其中一次还被标成「我说」。
+    const recent = this.#recent()
     this.journal.append({ kind: 'chat', id: `me_${at}`, at, from: 'me', text: body })
+    // 面板对话跟 QQ 侧共用同一份长期记忆：显式「记住…」要写进事实本，
+    // 并且每次生成都要把记忆摘要塞进 prompt。以前 Chat 既不写也不读 ——
+    // 面板上聊半天，记忆页永远只有 QQ 那几条，用户看到的就是「记忆没写」。
+    try {
+      if (this.runtime?.memory) {
+        if (/^记住你自己[，,：:]?/.test(body)) {
+          this.runtime.memory.rememberSelf(body.replace(/^记住你自己[，,：:]?\s*/, ''))
+        } else if (/^记住[，,：:]?/.test(body)) {
+          this.runtime.memory.rememberFact(body.replace(/^记住[，,：:]?\s*/, ''), { source: 'panel' })
+        }
+      }
+    } catch {}
 
     const started = this.now()
     try {
@@ -178,7 +194,10 @@ export class Chat {
         soul: this.runtime?.personaText ? this.runtime.personaText() : '',
         habitLine: this.runtime?.habitLine ? this.runtime.habitLine('private') : '',
         styleGuide: this.runtime?.styleGuide?.('private') || '',
-        recent: this.#recent(),
+        // 面板对话也要带长期记忆。以前这里没有 memory，模型只能看到最近几条 chat，
+        // 记不住事实本里已经写下的人和事，看起来就像「每次多轮都失忆」。
+        memory: this.runtime?.memory ? this.runtime.memory.digest({ query: body }) : null,
+        recent,
       })
       const meta = { conversation: CONVERSATION, scope: 'panel' }
       let result = await this.runner(prompt, meta)

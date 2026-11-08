@@ -166,13 +166,16 @@ const RAW_ITEMS = [
   // 留空是**合法**的：留空 = 跟着宿主当前对话用的模型走。
   // 但宿主一个模型都没选时，这里是唯一能救场的地方 —— 所以它必须在界面上，
   // 而不是像以前那样只活在错误提示里（提示让人去填，填了又被 migrate 丢掉）。
+  bool('modelFollowDefault', '默认跟随 deepseek-account / deepseek-flash', 'model', {
+    hint: '开启时下面两项不生效，固定用默认档；关闭后才按下面两项。两项都留空 = 跟随宿主当前对话模型',
+  }),
   text('modelProvider', '模型提供方', 'model', {
-    placeholder: '留空 = 跟随当前对话',
-    hint: '要和下面那一项一起填才生效；只填一个按「没填」处理',
+    placeholder: '留空 = 跟随当前对话；没有对话模型时用 deepseek-account',
+    hint: '关闭「默认跟随」后才生效；要和下面那一项一起填，只填一个按「没填」处理',
   }),
   text('model', '模型名', 'model', {
-    placeholder: '留空 = 跟随当前对话',
-    hint: '写模型自己的名字（例如 deepseek-chat）。填错不会崩，但每次生成都会失败并说明原因',
+    placeholder: '留空 = 跟随当前对话；没有对话模型时用 deepseek-flash',
+    hint: '写模型自己的名字（例如 deepseek-chat）。默认档：deepseek-account / deepseek-flash；填错不会崩，但每次生成都会失败并说明原因',
   }),
 
   // ── QQ 连接 ───────────────────────────────────────────────────

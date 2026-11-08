@@ -6,7 +6,7 @@
 它不是「接个机器人框架 + 写死提示词」，而是把**记忆、语气、作息、注意力**当成会一直长下去的东西：
 聊过的人有档案，说过的话过闸门，夜里会闭嘴，换个通道还是它。
 
-- 版本：`0.40.0`
+- 版本：`0.46.0`
 - 许可：MIT
 - 平台：Windows 10/11（x64）+ DSH 桌面版
 - 状态：个人项目，长期自用中，接口会变
@@ -23,7 +23,7 @@
 | **有闸门** | 每小时最多 60 条、每分钟 15 条、夜间时段沉默；说出去的话统一走出站闸门 |
 | **群聊有注意力** | 按人开窗、换人要判据，不抢话；话题、追更、冷场都有自己的账本 |
 | **自己会过日子** | 活动心跳、主动搭话、早晚报、热榜（默认关，可在面板开） |
-| **有个面板** | 88 个配置项全中文、分 10 个区，能看「最近发生了什么」、一键复制诊断信息 |
+| **有个面板** | 96 个配置项全中文、分 10 个区，能看「最近发生了什么」、一键复制诊断信息 |
 | **会干活** | 联网、浏览器（CDP）、代码沙箱、可教的技能簿 |
 
 一句话：**它更像一个住在你 QQ 里的熟人，而不是一个问答接口。**
@@ -43,7 +43,7 @@
 
 ### 方式 A：下载压缩包（推荐给群友）
 
-1. 在群文件 / Release 页下载 `dsh-shenlan-whale-0.40.0.zip`，解压到一个**固定位置**，例如 `D:\dsh-shenlan-whale`。
+1. 在群文件 / Release 页下载 `dsh-shenlan-whale-0.46.0.zip`，解压到一个**固定位置**，例如 `D:\dsh-shenlan-whale`。
    > 位置别选桌面或下载目录，后面升级、重装都靠这个路径找回来。
 2. 打开 DSH，进入 **设置 → 插件**（插件管理）。
 3. 添加一个 bundle，安装源填：
@@ -58,7 +58,7 @@
 ### 方式 B：从仓库安装（想跟更新的）
 
 ```powershell
-git clone https://github.com/xwxw773-debug/W-x-x-W.git D:\dsh-shenlan-whale
+git clone https://github.com/WxWx148/W-x-x-W.git D:\dsh-shenlan-whale
 ```
 
 然后在设置 → 插件里填 `file:D:\dsh-shenlan-whale`，或在 profile 的 `package.json` 里加依赖（见方式 C）。
@@ -119,7 +119,7 @@ NapCat → 网络配置 → **WebSocket 服务端**：
 
 ### 4. 启动
 
-面板上点「启动协议端」；或者直接双击仓库里的 `启动NapCat.bat`（先把里面的 `YOUR_QQ` 改成你的小号）。
+面板上点「启动协议端」；或者直接双击仓库里的 `启动NapCat.bat`（里面写死的 QQ 号是占位值，先改成你的小号）。
 
 状态灯变成「已连着 xx 小时」就通了。拿自己的大号给小号发条「在吗」试试。
 
@@ -127,7 +127,7 @@ NapCat → 网络配置 → **WebSocket 服务端**：
 
 ## 常用配置
 
-全部 88 个键都能在面板里改，这里是容易踩坑的几个：
+全部 96 个键都能在面板里改，这里是容易踩坑的几个：
 
 | 键 | 默认 | 说明 |
 |---|---|---|
@@ -168,42 +168,36 @@ NapCat → 网络配置 → **WebSocket 服务端**：
 ## 目录结构
 
 ```
-index.js              装配层：建运行时、挂 /api/shenlan/* 路由、起定时器
-lib/
-  runtime.mjs         运行时状态：事件流、审计、配置、技能簿、出站闸门
-  config.mjs          配置的唯一形状：默认值 / 扁平化 / 迁移 / 读写
-  panel.mjs           每个配置键的中文名、校验、分组、风险等级
-  panel-view.mjs      面板数据（纯函数）
-  client.js           浏览器端界面
-  turn.mjs            一轮对话：工具环、说还是不说
-  chat.mjs            面板里直接聊，不经过 QQ
-  behavior.mjs        「这条消息该不该接」
-  guard.mjs           说话闸门
-  typing.mjs          出站节奏：按字数等、单飞、留缝、正在输入
-  attention.mjs       群聊注意力账本
-  memory.mjs          记忆：事实 + 人物 + 联想
-  induction.mjs       从聊天里归纳「这个人是谁」
-  skill.mjs           技能簿
-  tools.mjs           模型能调什么、怎么调
-  journal.mjs / log.mjs   审计与日志
-  event.mjs           事件的唯一形状
-  qq/onebot.mjs       OneBot 11：连、断、事件翻译、发动作
-  qq/napcat.mjs       NapCat 进程、安装目录、WebUI 登录
-tests/                40 个用例文件 + 三个静态守卫
-scripts/              check-*.mjs（守卫）、sync-to-profile.mjs（部署）、smoke 等
+index.js                装配层：建运行时、挂 /api/shenlan/* 路由、起定时器
+base/                   地基：日志、审计流水、备份
+facts/                  事实：事件打标、用量账本（token → 钱 → 预算）
+truth/                  控制面：配置形状、面板项清单、结构快照、守卫口径
+decide/                 纯判断：该不该接、在跟谁说、节奏、去重（无 IO、无模型）
+turn/                   一轮对话：解析、召回、生成、工具环、决定说还是不说
+voice/                  人话层：断句、语气长度、标记清洗、卡片
+mind/                   心智：记忆、人设、需求本、拒绝簿，learn/ 从发生过的事里学
+ability/                能做事：技能簿、工具表、沙箱、审批、联网、浏览器、媒体、表情
+life/                   自主：活动心跳、到点提醒、活动自己的账本
+view/                   呈现：面板载荷、会话视图、诊断项、只读列表
+channel/                通道：OneBot 11 协议、NapCat 进程与登录、掉线补回
+lib/                    共用件：client.panel.js（浏览器端界面）、结构快照、规则表
+tests/ scripts/ probes/ 用例、静态守卫、真机探针
 ```
 
-设计文档：[CONCEPTS.md](CONCEPTS.md)（东西放哪、为什么这么分）、[SCHEME.md](SCHEME.md)（硬性契约）、[UX.md](UX.md)（界面取舍的推理过程）、[CHANGELOG.md](CHANGELOG.md)。
+分层不是画着好看：跨层 `import` 会被 `scripts/check-layers.mjs` 当场判红，所以「谁可以依赖谁」是代码保证的，不是口头约定。
+
+设计文档：[ARCHITECTURE.md](ARCHITECTURE.md)（12 层怎么分、每条规矩由谁守、哪些重构刻意没做）、[CHANGELOG.md](CHANGELOG.md)（逐版变化）。
 
 ---
 
 ## 开发
 
 ```powershell
-npm test          # 40 个用例 + 三个守卫（文案/归属/分层）
-npm run smoke     # 全链路冒烟
-npm run probe     # 真实进程里的面板路由
-npm run check     # 只跑静态守卫
+npm test           # 全部用例 + 守卫（文案 / 归属 / 分层 / 界面）
+npm run audit      # 11 道守卫一次跑完
+npm run smoke      # 全链路冒烟
+npm run probe      # 真机探针
+npm run verify:http # 真 socket 走一遍全部路由
 ```
 
 一个**必须知道的坑**：profile 里 `file:` 依赖 pnpm 是**复制**不是软链。改了源码，宿主加载的还是旧副本。

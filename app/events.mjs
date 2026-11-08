@@ -20,8 +20,13 @@ export function eventKeyOf({ runtime, sandbox, channel, napcat } = {}) {
     (sandbox?.approvals?.list?.() || []).map((one) => (one && one.id) || '').join(','),
   )
   const channelState = part(() => {
-    const state = channel?.state?.() || {}
-    return [state.online, state.connected, state.state].filter((v) => v !== undefined).join(':')
+    const state = channel?.state?.()
+    // OneBotChannel.state() 返回的是字符串（off/unknown/offline/online）。
+    // 以前一律当对象取 state.online/connected/state，字符串上全是 undefined，
+    // 摘要里这一项永远是空串 —— 通道上线/掉线不会推 invalidate，面板只能等兜底轮询。
+    if (typeof state === 'string') return state
+    const value = state || {}
+    return [value.online, value.connected, value.state].filter((v) => v !== undefined).join(':')
   })
   const login = part(() => {
     const state = napcat?.snapshot?.() || {}

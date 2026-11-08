@@ -1677,13 +1677,17 @@ export function detailView(input = {}) {
   if (key === 'process.cot') {
     const page = journalPage(runtime?.cot, { before, limit })
     const live = typeof runtime?.liveCotRows === 'function' ? runtime.liveCotRows() : []
+    // 旧的自主活动记录还躺在 cot.jsonl 里；界面只展示聊天回合的思考，
+    // 自主活动统一去「自主活动」页看，不再混进思维链。
+    const isAutonomous = (row) => ['activity', 'proactive', 'interject'].includes(String(row?.kind || ''))
+      || String(row?.conversation || '') === 'activity'
     return {
       ...base,
       kind: 'rows',
       title: '思维链',
       subtitle: '想完再做：每次工具调用与回复发出前，先落一条',
       rows: [
-        ...live.map((row) => ({
+        ...live.filter((row) => !isAutonomous(row)).map((row) => ({
           id: 'live:' + String(row.conversation || ''),
           title: '正在想…',
           meta: `${clockText(row.at)} · ${row.conversation ? String(row.conversation).replace(':', ' · ') : '实时'}`,
@@ -2108,7 +2112,9 @@ function cotSpend(row) {
  */
 function activitySpendText(row) {
   const tokens = row?.tokens
-  if (!tokens) return ''
+  // learn 这类活动只联网读页、根本没调模型，不该显示成空白让人以为漏账；
+  // 其它有模型调用但宿主没给数字的，明确写「没拿到」。
+  if (!tokens) return row?.kind === 'learn' ? '未调用模型' : ''
   if (tokens.tracked === false || (!Number(tokens.input) && !Number(tokens.output))) return '没拿到 token 数'
   return `${countText(tokens.input)} in · ${countText(tokens.output)} out`
 }

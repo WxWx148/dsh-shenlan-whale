@@ -1,37 +1,15 @@
-# 依赖与构建产物
+# 依赖
 node_modules/
-dist/
-*.tgz
 
-# 本地归档与回滚点（体积很大，不进仓库）
-_archive/
-.snapshots/
-*.bak-*/
-_manual-backup-*/
-
-# 运行时数据（都在 ~/.dsh/shenlan-whale 里，万一被复制过来也别提交）
-config.json
-*.jsonl
-usage.json
-events.jsonl
-audit.jsonl
-journal.jsonl
-*.local.json
-
-# 生成物
-docs/changes.html
+# 运行时数据：不进版本
 sandbox/
+.snapshots/
+.napcat-autostart-enabled
 
-# 日志与临时文件
-*.log
-tmp/
-.tmp/
-未命名*
+# 坏文件留的原件（lib/core.mjs 会生成 *.bad-<时间>）
+*.bad-*
 
-# 编辑器 / 系统
-.vscode/
-.idea/
-*.swp
-Thumbs.db
-desktop.ini
+# 系统与编辑器
 .DS_Store
+Thumbs.db
+*.log

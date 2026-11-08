@@ -26,6 +26,7 @@ import { digestForward } from './forward.mjs'
 import { capabilityBrief } from '../truth/index.mjs'
 import { listStickers, loadStickers, pickSticker, resolveSticker, saveSticker } from './stickers.mjs'
 import { listTree, readSource, restoreBackup, rootOf, runCommand, searchSource, writeSource } from './coding.mjs'
+import { openUrl, readCurrent, formatPage } from './browser.mjs'
 
 /**
  * 本文件**不 import 任何父模块**（truth 除外：那层是纯真源，只有常量与形状）。
@@ -134,6 +135,7 @@ const TOOL_LABELS = Object.freeze({
   calc: '算数',
   web_search: '联网搜索',
   web_fetch: '读网页',
+  browser: '浏览器',
   digest: '每日简报',
   exec_sandbox: '沙箱',
   self_tune: '调整自己',
@@ -161,6 +163,7 @@ const TOOL_LABELS = Object.freeze({
   send_face: '发小黄脸',
   at_person: '群里@人',
   read_forward_more: '展开转发',
+  withdraw_message: '撤回消息',
   recall: '回忆旧话',
   remember_fact: '记住事实',
   remember_self: '记住自己',
@@ -297,10 +300,10 @@ export function usageSourceOfTool(name) {
  * `my_capabilities` 留在里面 —— 模型不确定自己会不会时，可以先查一遍再答。
  */
 const CHAT_TOOLS = Object.freeze(new Set([
-  'time', 'calc', 'web_search', 'web_fetch',
+  'time', 'calc', 'web_search', 'web_fetch', 'browser',
   'recall', 'remember_fact', 'remember_person', 'remember_self', 'my_memory', 'my_digest',
   'my_status', 'my_capabilities', 'owner_commands',
-  'send_sticker', 'send_face', 'at_person', 'read_forward_more',
+  'send_sticker', 'send_face', 'at_person', 'read_forward_more', 'withdraw_message',
   'draw_image', 'news_now', 'hot_news',
   'remind', 'set_reminder', 'note_want', 'my_wants',
   'file_read', 'image_read',
@@ -314,7 +317,9 @@ const TOOL_HINTS = Object.freeze({
   code_list: '{"path":"lib","recursive":0}',
   run_command: '{"bin":"node","args":["scripts/check-layers.mjs"]}',
   recall: '{"query":"上次说的那个"}',
+  browser: '{"action":"open","url":"https://example.com"}',
   send_sticker: '{"mood":"无语"}',
+  withdraw_message: '{"next":true}',
   at_person: '{"qq":"10001","text":"在呢"}',
   news_now: '{"source":"weibo"}',
   note_want: '{"what":"想看某本书"}',
@@ -345,7 +350,7 @@ const HINT_ORDER = Object.freeze([
   'code_search', 'code_read', 'code_list',
   'remind', 'revise_persona', 'group_recap',
   'who_said', 'person_dossier', 'my_memory',
-  'recall', 'read_forward_more', 'my_status',
+  'browser', 'recall', 'withdraw_message', 'read_forward_more', 'my_status',
   'audit_self', 'my_patch_proposals',
 ])
 
@@ -464,6 +469,19 @@ export function createTools(input = {}) {
     if (!channel) return { ok: false, error: '通道没接上，发不出去', code: 'not_wired' }
     return null
   }
+
+  /** 浏览器工具和主人命令共用同一份配置，避免两套默认值 */
+  const browserConfig = () => ({
+    browserHeadless: runtime?.config?.browser?.headless !== false,
+    browserCdpUrl: String(runtime?.config?.browser?.cdpUrl || ''),
+    browserAllowPrivate: runtime?.config?.browser?.allowPrivate === true,
+    browserIdleMinutes: Number(runtime?.config?.browser?.idleMinutes) || 10,
+    browserMaxPerHour: Number(runtime?.config?.browser?.maxPerHour) || 60,
+    browserProfileDir: path.join(runtime?.dir || '', 'browser-profile'),
+    renderBrowserPath: String(runtime?.config?.browser?.path || ''),
+    browserTimeoutMs: 12_000,
+    browserMaxChars: 3000,
+  })
 
   /** 当前会话的发送目标；没有会话上下文就返回 null */
   const targetOf = (ctx = {}) => {
@@ -652,7 +670,27 @@ export function createTools(input = {}) {
     if (!runtime || typeof runtime.describeImageFile !== 'function') return { ok: false, error: '看图能力还没接上' }
     const file = String(args.path || args.file || '')
     if (!file) {
-      const pic = ctx.event?.payload?.images?.[0]
+      // 图片和「看看这图里的字」经常是两条消息：当前这条只有文字。
+      // 先看当前/引用，再往这个会话最近的事件里找带图的，不能直接让用户重发。
+      let pic = ctx.event?.payload?.images?.[0] || ctx.quote?.images?.[0] || null
+      if (!pic && Array.isArray(ctx.forwardAll)) {
+        for (const row of ctx.forwardAll) {
+          const one = Array.isArray(row?.imageItems) ? row.imageItems[0] : null
+          if (one?.file || one?.url) { pic = one; break }
+        }
+      }
+      if (!pic && runtime?.events?.read) {
+        try {
+          const rows = runtime.events.read({
+            limit: 60,
+            maxScan: 3000,
+            filter: (row) => (!ctx.event?.conversation || row?.conversation === ctx.event.conversation)
+              && ((Array.isArray(row?.images) && row.images.length > 0)
+                || (Array.isArray(row?.payload?.images) && row.payload.images.length > 0)),
+          })?.rows || []
+          pic = rows[0]?.images?.[0] || rows[0]?.payload?.images?.[0] || null
+        } catch {}
+      }
       if (!pic) return { ok: false, error: '要给我一张图（文件路径或聊天里的图）' }
       const buffer = await imageBuffer(pic)
       if (!buffer) return { ok: false, error: '这张图取不到' }
@@ -904,9 +942,11 @@ export function createTools(input = {}) {
         const found = runtime.events.read({
           limit: 60,
           maxScan: 3000,
-          filter: (row) => Array.isArray(row?.payload?.images) && row.payload.images.length > 0,
+          filter: (row) => (!ctx.event?.conversation || row?.conversation === ctx.event.conversation)
+            && ((Array.isArray(row?.images) && row.images.length > 0)
+              || (Array.isArray(row?.payload?.images) && row.payload.images.length > 0)),
         })?.rows || []
-        const latest = found[0]?.payload?.images || []
+        const latest = found[0]?.images || found[0]?.payload?.images || []
         pic = latest[0] || null
       } catch {}
     }
@@ -974,6 +1014,10 @@ export function createTools(input = {}) {
     const qq = String(args.qq ?? args.uin ?? args.user_id ?? '').replace(/\D/g, '')
     const text = String(args.text || args.say || '').trim().slice(0, 60)
     if (!/^\d{5,12}$/.test(qq) || !text) return { ok: false, error: 'qq 或要说的话不合法' }
+    const selfId = String(channel?.selfId || runtime?.config?.channel?.selfId || '')
+    if (selfId && qq === selfId) {
+      return { ok: false, error: `不能 @ 自己（${selfId} 是你自己的 QQ 号）` }
+    }
     if (!allow('at:' + target.target, 3, 3_600_000)) return { ok: false, error: '本小时 @ 的次数用完了（上限 3 次）' }
     try {
       await channel.sayAt(target.target, qq, text)
@@ -988,6 +1032,8 @@ export function createTools(input = {}) {
   // [tool:read_forward_more] {}，于是每次都拿到同一页，永远「还差 8 条」，
   // 一路烧到轮数用完，最后一句正文都没有 —— 线上就是这么空白的。
   const forwardCursors = new Map()
+  // 撤回限流：同一个会话 30 秒内只允许一次，防止模型在工具环里反复撤。
+  const recallCooldown = new Map()
 
   add('read_forward_more', (args = {}, ctx = {}) => {
     const all = Array.isArray(ctx.forwardAll) ? ctx.forwardAll : []
@@ -1038,6 +1084,76 @@ export function createTools(input = {}) {
       ok: true,
       text: `${digest.text}\n${tail}`,
       data: { total: all.length, from, nextFrom: done ? null : nextFrom, done },
+    }
+  })
+
+  /**
+   * 撤回**自己**刚发的一条消息。
+   *
+   * 自主撤回的硬边界：
+   *   · 只认当前会话里 from=self 的记录；
+   *   · 只认带 messageId 的、2 分钟内发出的消息；
+   *   · 没传 id 时最多撤最近一条，不能翻旧账；
+   *   · 同一会话 30 秒内只允许一次，防止工具环反复撤。
+   * 别人的消息、超过 2 分钟的消息、跨会话的消息一律拒绝。
+   */
+  add('withdraw_message', async (args = {}, ctx = {}) => {
+    const missing = needChannel()
+    if (missing) return missing
+    if (!channel || typeof channel.recall !== 'function') return { ok: false, error: '这条通道不支持撤回' }
+    const event = ctx.event
+    if (!event) return { ok: false, error: '现在不在聊天里，不知道撤哪条' }
+    // 「发一句无意义内容，然后撤回」这种演示：先登记，等这一轮最终回复
+    // 真的拿到 messageId 之后，由 #say 定时撤回。不能撤还没发出的东西。
+    if (args.next === true) {
+      if (typeof ctx.scheduleRecall !== 'function') return { ok: false, error: '当前回合不支持“发完再撤”' }
+      ctx.scheduleRecall({ delayMs: args.delayMs })
+      return { ok: true, text: '好，这一条发出去后会撤回', data: { next: true } }
+    }
+    const conversation = String(event.conversation || '')
+    const now = Date.now()
+    const last = Number(recallCooldown.get(conversation) || 0)
+    if (now - last < 30_000) return { ok: false, error: '刚撤过一条，先等一会儿再撤' }
+
+    const explicit = String(args.messageId ?? args.message_id ?? '').trim()
+    let rows = []
+    try {
+      rows = runtime?.events?.read({
+        limit: 80,
+        maxScan: 5000,
+        filter: (row) => row?.from === 'self'
+          && row?.conversation === conversation
+          && String(row?.messageId || ''),
+      })?.rows || []
+    } catch {}
+    const target = explicit
+      ? rows.find((row) => String(row.messageId) === explicit)
+      : rows[0]
+    if (!target?.messageId) return { ok: false, error: '没找到自己刚发的、可撤回的消息' }
+    if (target.from !== 'self' || target.conversation !== conversation) {
+      return { ok: false, error: '只能撤回自己在这个会话里发的消息' }
+    }
+    const age = now - (Number(target.at) || 0)
+    if (age < 0 || age > 120_000) {
+      return { ok: false, error: '只能撤回自己 2 分钟内发的消息；这条已经太久了' }
+    }
+    try {
+      await channel.recall(target.messageId)
+    } catch (error) {
+      return { ok: false, error: String(error?.message || error) }
+    }
+    recallCooldown.set(conversation, now)
+    const preview = String(target.text || '').slice(0, 40)
+    runtime?.log?.('recall_message', {
+      conversation,
+      messageId: String(target.messageId),
+      ageMs: age,
+      autonomous: ctx.event?.source !== 'panel',
+    })
+    return {
+      ok: true,
+      text: '撤回了一条自己刚发的消息' + (preview ? '：' + preview : ''),
+      data: { messageId: String(target.messageId) },
     }
   })
 
@@ -1279,7 +1395,7 @@ export function createTools(input = {}) {
     const gid = String(args.groupId ?? args.group ?? ctx.event?.payload?.groupId ?? '').replace(/\D/g, '')
     if (!gid) return { ok: false, error: '要给我群号' }
     const group = memory.group(gid)
-    // 「群 578391484」和「我」都要算：self 事件按 conversation 归属，
+    // 「群 300000001」和「我」都要算：self 事件按 conversation 归属，
     // 只按 group 过滤会把机器人自己说过的话漏掉，回顾就成了单向的。
     const recent = messages(2000)
       .filter((row) => (String(row.group) === gid || row.conversation === 'group:' + gid) && row.text)
@@ -1622,6 +1738,28 @@ export function createTools(input = {}) {
     return { ok: true, text: `好，${minutes} 分钟内不接 ${uin} 的话` }
   })
 
+  // 浏览器能力以前只挂在主人的「打开/看看/截图」命令上，模型工具表里没有，
+  // 于是被问「能不能操作浏览器」时只能答「我没装」。这里把同一套能力接进工具表。
+  add('browser', async (args = {}) => {
+    const action = String(args.action || 'open').toLowerCase()
+    try {
+      if (action === 'read' || action === 'current') {
+        const result = await readCurrent(browserConfig())
+        return result.ok
+          ? { ok: true, text: formatPage(result.page, { maxChars: 1800 }) }
+          : { ok: false, error: String(result.error || result.why || '读不到当前页面') }
+      }
+      const url = String(args.url || '').trim()
+      if (!/^https?:\/\//i.test(url)) return { ok: false, error: '要打开的地址必须是 http(s) 链接' }
+      const result = await openUrl(url, browserConfig())
+      return result.ok
+        ? { ok: true, text: formatPage(result.page, { maxChars: 1800 }) }
+        : { ok: false, error: String(result.error || result.why || '打不开这个页面') }
+    } catch (error) {
+      return { ok: false, error: String(error?.message || error) }
+    }
+  })
+
   /**
    * 当前被关掉的工具名（面板关掉的技能 → 它底下那几个工具）。
    * 拿不到就当「没有关掉的」：判定链坏了不该把工具全禁掉。
@@ -1729,8 +1867,13 @@ export function createTools(input = {}) {
     if (names.includes('code_write')) selfBits.push('源码用 code_read/code_write（改前自动备份）')
     if (names.includes('exec_sandbox')) selfBits.push('exec_sandbox 只跑临时脚本、只写 out/')
     const selfLine = mode === 'full' && selfBits.length ? `改自己：${selfBits.join('；')}。工具轮上限的键是 tools.maxRounds（0=不限）。` : ''
-    if (compact) return `可用工具：${names.join('、')}。例：${hints}。只输出工具调用行。`
-    return `可用工具：${names.join('、')}。参数写成 JSON 对象，例如 ${hints}。只输出工具调用行，不要解释。${selfLine ? ' ' + selfLine : ''}`
+    // 联网动作的顺序写死：先搜索，再打开具体页面；不要让模型去 run_command curl，
+    // 那条路既慢又容易超时，线上已经因此连续卡了好几轮。
+    const netLine = names.includes('web_search')
+      ? '联网先 web_search；要打开具体页面用 browser 或 web_fetch，不要用 run_command curl 抓网页。'
+      : ''
+    if (compact) return `可用工具：${names.join('、')}。例：${hints}。${netLine}只输出工具调用行。`
+    return `可用工具：${names.join('、')}。参数写成 JSON 对象，例如 ${hints}。只输出工具调用行，不要解释。${netLine ? ' ' + netLine : ''}${selfLine ? ' ' + selfLine : ''}`
   }
 
   return {

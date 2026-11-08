@@ -38,8 +38,13 @@ function serviceOf(ctx, name) {
   return ctx ? ctx[name] : null
 }
 
-/** 面板配置优先；否则跟随当前对话模型 */
+/** 没配置、宿主也没选模型时的默认档（与宿主 profile 的默认模型对齐） */
+export const DEFAULT_MODEL = Object.freeze({ provider: 'deepseek-account', model: 'deepseek-flash' })
+
+/** 面板配置优先；否则跟随当前对话模型；宿主也没选时回默认 DeepSeek 档 */
 export function resolveModel(ctx, config = {}) {
+  // 开关优先：开启时下面两项即使填了也不生效，固定用默认档。
+  if (config.modelFollowDefault === true) return { ...DEFAULT_MODEL }
   if (config.modelProvider && config.model) {
     return { provider: String(config.modelProvider), model: String(config.model) }
   }
@@ -50,6 +55,7 @@ export function resolveModel(ctx, config = {}) {
       return { provider: String(selected.provider), model: String(selected.model) }
     }
   } catch {}
+  // 关闭默认档、又没填两项、宿主也没选：如实返回空，不偷偷回默认档。
   return null
 }
 
@@ -90,9 +96,10 @@ export async function createHostRunner(input = {}) {
     return null
   }
   const config = input.config || {}
-  const timeoutMs = Math.max(10_000, Number((config.channel && config.channel.turnTimeoutMs) || 0) || 90_000)
-  const model = resolveModel(ctx, config)
-  if (!model) {
+  // 启动时只用来判断「有没有可接的模型」。具体 provider/model/超时在每次调用时
+  // 重新读：面板上这两项标的是「下一轮生效」，旧代码在启动时拷死，改了要重启。
+  const startupModel = resolveModel(ctx, config)
+  if (!startupModel) {
     log('[whale] 没有可用模型：先在对话页选一个模型，或者在面板「设置 → 模型」里填「模型提供方」和「模型名」（两项都要填）')
     return null
   }
@@ -106,6 +113,9 @@ export async function createHostRunner(input = {}) {
 
   return async function runner(prompt, meta = {}) {
     const conversation = String(meta.conversation || 'default')
+    // 每次生成都重新解析：面板上换模型/改超时，下一条消息就生效。
+    const model = resolveModel(ctx, config) || startupModel
+    const timeoutMs = Math.max(10_000, Number((config.channel && config.channel.turnTimeoutMs) || 0) || 90_000)
     // 800 太小：思考分片也算在 maxTokens 里，长一点的思考会把正文挤没。
     // 线上「一直想，然后没做成」就是 finish 只跑到思考、正文为空。
     const baseMaxTokens = Math.max(64, Number((config.channel && config.channel.maxOutputTokens) || 0) || 1600)

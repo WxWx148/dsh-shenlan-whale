@@ -262,9 +262,9 @@ export function apply(ctx) {
    * 两条都必须只有这一个出口：漏记「我说过」，下一轮上下文里就只有别人说的话；
    * 漏记额度，面板显示的条数与实际发出的条数会对不上，限流随之变得不可预测。
    */
-  const noteSelf = (scope, target, text, count = 1) => {
+  const noteSelf = (scope, target, text, count = 1, messageId = '') => {
     try {
-      runtime.noteSelfMessage({ conversation: `${scope}:${target}`, scope, text, at: Date.now() })
+      runtime.noteSelfMessage({ conversation: `${scope}:${target}`, scope, text, at: Date.now(), messageId })
     } catch {}
     try {
       guard.note(Date.now(), { scope, target, conversation: `${scope}:${target}` }, count)
@@ -309,8 +309,8 @@ export function apply(ctx) {
     // 只记一边就会出现「说过但没算额度」，或者「算过额度但上下文里没有这句」，
     // 后者会让它把自己的话当成对方说的。两条路径都走它，通道出口就只有一个。
     const sendOne = async (one, record = true, count = 1) => {
-      await channel.say(scope, target, one)
-      noteSelf(scope, target, one, count)
+      const sentOne = await channel.say(scope, target, one)
+      noteSelf(scope, target, one, count, sentOne?.message_id || sentOne?.data?.message_id || '')
       if (!record) return
       // 发出去才算「说过」：发送失败不能进这份记录，否则下一句正常的话会被误拦
       const key = `${scope}:${target}`
@@ -617,16 +617,8 @@ export function apply(ctx) {
         source: 'auto',
         tokens: spent,
       })
-      // 思维链先于发言：主动开口也是它想说的话，发送前先落一条
-      runtime.logCot?.({
-        conversation: 'private:' + owner,
-        kind: 'proactive',
-        text: String(result.reasoning || '（主动开口，没有单独输出思考过程）'),
-        summary: '主动开口：' + String(result.text).slice(0, 80),
-        at: Date.now(),
-        source: 'auto',
-        tokens: spent.tracked ? spent : null,
-      })
+      // 主动开口和群里插话都只进活动账本，不再写思维链。
+      // 思维链只保留聊天回合；自主活动在「活动」页单独看。
       await outbound('private', owner, result.text)
       state.count += 1
       state.lastAt = Date.now()
@@ -694,7 +686,8 @@ export function apply(ctx) {
       }
       const text = `自己翻了翻「${topic}」：${String(pick.title || '').slice(0, 80)}。${body.replace(/\s+/g, ' ').slice(0, 260)}`
       runtime.logActivity({ kind: 'learn', text })
-      runtime.memory?.rememberSelf?.(text.slice(0, 160))
+      // 搜索摘要不是「自我认知」：这里只进活动账本，不写 memory.self。
+      // 以前把整段网页摘要写进去，自我认知页看起来全是百科/新闻。
       lastLearnedAt = Date.now()
       log('[whale] 掉线自学：' + topic)
     } catch (error) {
@@ -708,15 +701,27 @@ export function apply(ctx) {
   // 和参考实现（QQFish watchdog）对齐：断线 2 分钟才开始考虑重启，每小时最多 2 次；
   // 重启只动 NapCat 自己的进程，不碰用户正在用的 QQ.exe。
   let offlineSince = 0
+  let lastWatchdogAt = 0
+  let watchdogRecovering = false
   const watchdogTimer = ticker.every(60_000, 'watchdog', async () => {
     try {
       // 群名缓存顺手续一下（30 分钟节流，不额外发请求）。
       if (channel.state() === 'online') channel.refreshGroups().catch(() => {})
       const cfg = runtime.config.channel || {}
       if (cfg.watchdogEnabled !== true || cfg.enabled !== true) { offlineSince = 0; return }
-      if (channel.state() === 'online') { offlineSince = 0; return }
       const now = Date.now()
-      if (!offlineSince) offlineSince = now
+      // 电脑睡眠 / 进程被挂起时，定时器不会跑。醒来后第一次 tick 如果看到
+      // 已经离线，不能从「现在」重新等 2 分钟 —— 那等于把睡眠前那一段丢了。
+      // 用两次 tick 的间隔判断是否刚醒，醒后直接按已离线处理。
+      const previousTick = lastWatchdogAt
+      lastWatchdogAt = now
+      const justWoke = previousTick > 0 && now - previousTick > 3 * 60_000
+      if (channel.state() === 'online') {
+        offlineSince = 0
+        watchdogRecovering = false
+        return
+      }
+      if (!offlineSince) offlineSince = justWoke ? previousTick : now
       // 连接假死（TCP 没断、帧不再来）只有它能发现；它只动 WebSocket，不杀进程。
       try {
         if (typeof channel.checkHealth === 'function') channel.checkHealth()
@@ -724,8 +729,24 @@ export function apply(ctx) {
       } catch {}
       const downMs = now - offlineSince
       if (downMs < Math.max(1, Number(cfg.watchdogMinutes) || 2) * 60_000) return
-      const result = await napcat.recover({ downMs, reason: 'watchdog' })
-      if (result.restarted) {
+      // 恢复本身可能卡在 NapCat 的登录/重启流程里。给它一个硬上限，
+      // 不能让 ticker 的 in-flight 闸把看门狗永久锁死。
+      if (watchdogRecovering) return
+      watchdogRecovering = true
+      let result
+      try {
+        result = await Promise.race([
+          napcat.recover({ downMs, reason: 'watchdog' }),
+          new Promise((resolve) => setTimeout(() => resolve({
+            ok: false,
+            restarted: false,
+            error: '看门狗恢复超时（100 秒）',
+          }), 100_000)),
+        ])
+      } finally {
+        watchdogRecovering = false
+      }
+      if (result?.restarted) {
         runtime.log('napcat_recover', {
           downMs,
           attempt: result.attempt,
@@ -738,8 +759,16 @@ export function apply(ctx) {
         if (result.online) log('[whale] 看门狗：协议端已恢复')
         else if (result.error) log('[whale] 看门狗：' + result.error)
         else log('[whale] 看门狗：已重启协议端，正在等登录')
-      } else if (result.error) {
+      } else if (result?.error) {
         log('[whale] 看门狗：' + result.error)
+      } else if (result?.skipped) {
+        // 等扫码/限流这类「没重启」也要留痕，否则面板上只剩一直被跳过。
+        runtime.log('watchdog_skip', {
+          downMs,
+          skipped: result.skipped,
+          phase: result.phase || '',
+          waitingMs: result.waitingMs || 0,
+        })
       }
     } catch (error) {
       log('[whale] 看门狗失败：' + String(error?.message || error))
@@ -772,7 +801,9 @@ export function apply(ctx) {
       const day = now.toDateString()
       if (state.day === day) return
       const digest = runtime.dailyDigest()
-      await outbound('private', owner, digest)
+      // 标明来源：这是定时简报，不是它对着某句话的回复。没有这一行，
+      // 下一轮上下文里它只看到一句自己发过的摘要，会当成自己刚说的话（线上已出现）。
+      await outbound('private', owner, '【今日简报】\n' + digest)
       saveState(file, { day })
       log('[whale] 已发每日简报')
     } catch (error) {
@@ -1012,21 +1043,17 @@ export function apply(ctx) {
       // 预算闸在推理之前：超了就别烧这一次。
       if (budgetBlocks()) return
       const line = await activeRunner('群里正聊着：\n' + context + '\n你顺着这个话题插一句，短、自然、不抢戏。插不上就只回一个句号。', { conversation: 'group:' + gid })
-      // 群里插话同样是自主推理：先记独立账本，再判断这句要不要发。
-      // 判定为「不发」时钱已经花了，以前这一笔既不进账本也不进思维链。
+      // 群插话算自主活动：顺着现场接一句，也是它自己的时间。
+      // 只记活动账本，不写思维链。
       const spent = activitySpend(runtime, line, { kind: 'interject' })
       const text = String(line?.text || '').trim()
       if (!text || text === '。' || text.length < 4) return
-      runtime.logActivity?.({ at: Date.now(), kind: 'interject', text: '群里插了一句：' + text.slice(0, 120), source: 'auto', tokens: spent })
-      // 思维链先于发言：群里的插话也要先想后说
-      runtime.logCot?.({
-        conversation: 'group:' + gid,
-        kind: 'interject',
-        text: String(line?.reasoning || '（群里插话，没有单独输出思考过程）'),
-        summary: '群里插话：' + text.slice(0, 80),
+      runtime.logActivity?.({
         at: Date.now(),
+        kind: 'interject',
+        text: '群里插了一句：' + text.slice(0, 120),
         source: 'auto',
-        tokens: spent.tracked ? spent : null,
+        tokens: spent,
       })
       await outbound('group', gid, text)
       state.count += 1
@@ -1090,7 +1117,7 @@ export function apply(ctx) {
       } catch {}
       if (!rows.length) { saveState(file, { day }); return }
       const lines = rows.slice(-6).map((row) => `- ${row.sender || row.from || '有人'}：${String(row.text || '[非文字]').slice(0, 60)}`)
-      const morningText = `昨晚到今早，有 ${rows.length} 条消息：\n${lines.join('\n')}`
+      const morningText = `【早上补回】昨晚到今早，有 ${rows.length} 条消息：\n${lines.join('\n')}`
       await outbound('private', owner, morningText)
       saveState(file, { day })
       log('[whale] 已发早上补回')

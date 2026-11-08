@@ -130,6 +130,12 @@ export function route(event, ctx = {}) {
     }
     if (event.scope === SCOPE.PRIVATE) return { behavior: BEHAVIOR.REPLY, trigger: 'private', reason: '私聊' }
     if (has(event, TAG.AT_ME)) return { behavior: BEHAVIOR.REPLY, trigger: 'at_me', reason: '被 @ 了' }
+    // @ 了别人 = 这句话的对象不是它。即使还在 follow-up 窗口、或正文里出现
+    // 「你/名字」，也不该把别人的对话接到自己身上。
+    const atOthers = Array.isArray(event.payload?.atOthers) ? event.payload.atOthers.filter(Boolean) : []
+    if (atOthers.length) {
+      return { behavior: null, trigger: 'addressed_to_other', reason: '这条 @ 的是别人，不是深蓝' }
+    }
     if (has(event, TAG.MENTIONED_NAME) && ctx.config?.proactive?.nameCall !== false) return { behavior: BEHAVIOR.REPLY, trigger: 'name_called', reason: '名字被叫到' }
     if (has(event, TAG.CALLED)) return { behavior: BEHAVIOR.REPLY, trigger: 'called', reason: '被“在吗/出来”等呼唤' }
     // 注意力账本的判定优先于兴趣词：兴趣词是「我可能想说」，窗口是「对方正在跟我说话」。

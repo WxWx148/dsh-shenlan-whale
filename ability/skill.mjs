@@ -123,7 +123,7 @@ export const CATALOG = Object.freeze([
 
   // ── 上网 ──────────────────────────────────────────────────────
   { id: 'net.search', name: '上网搜一下', what: '不知道的事去查，回来只说结论', group: 'net', needs: ['net'], tools: ['web_search'], risk: 'medium' },
-  { id: 'net.fetch', name: '打开网页看', what: '给了链接就去看内容', group: 'net', needs: ['net'], tools: ['web_fetch'], risk: 'medium' },
+  { id: 'net.fetch', name: '打开网页看', what: '给了链接就去看内容（能操作本机浏览器）', group: 'net', needs: ['net'], tools: ['web_fetch', 'browser'], risk: 'medium' },
   { id: 'net.news', name: '看热榜', what: '各平台今天在热什么', group: 'net', needs: ['net'], tools: ['news_now', 'hot_news'], risk: 'low' },
 
   // ── 看和听 ────────────────────────────────────────────────────
@@ -133,6 +133,7 @@ export const CATALOG = Object.freeze([
   { id: 'media.face', name: '发小黄脸', what: '聊天框里的 QQ 原生表情', group: 'media', needs: ['channel'], tools: ['send_face'], risk: 'low' },
   { id: 'media.at', name: '群里 @ 人', what: '该找谁说话时 @ 他一下', group: 'media', needs: ['channel'], tools: ['at_person'], risk: 'medium' },
   { id: 'media.forward', name: '展开转发', what: '聊天记录太长时能接着往下看', group: 'media', needs: ['channel'], tools: ['read_forward_more'], risk: 'low' },
+  { id: 'media.recall', name: '撤回消息', what: '说错了能撤回自己刚发的那条（2 分钟内）', group: 'media', needs: ['channel'], tools: ['withdraw_message'], risk: 'medium' },
   { id: 'media.avatar', name: '看头像', what: '看看这个人的头像是什么样', group: 'media', needs: ['channel'], tools: ['view_avatar'], risk: 'low' },
   { id: 'media.draw', name: '画一张图', what: '描述一句就能画出来发过去', group: 'media', needs: ['channel', 'net'], tools: ['draw_image'], risk: 'medium' },
   { id: 'media.refuse', name: '暂时不理人', what: '被冒犯时可以安静一阵子', group: 'media', needs: ['channel'], tools: ['refuse_person'], risk: 'medium' },

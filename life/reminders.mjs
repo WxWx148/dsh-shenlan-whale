@@ -245,12 +245,31 @@ export function parseReminder(text, now = Date.now()) {
 
   const when = parseWhen(body, now)
   if (!when.ok) return null
-  let rest = body.replace(when.matched, ' ')
-  rest = rest
-    .replace(/^[，,：:\s]*(?:提醒我|叫我|记得|别忘了?|提醒)[，,：:\s]*/, '')
-    .replace(/^[，,：:\s]+/, '')
-    .replace(/[，,：:\s]+$/, '')
-    .trim()
+  const intentRe = /(?:提醒我|叫我|记得|别忘了?|提醒)/
+  // 不能拿整句去剥时间：一句话里常有「继续先测其他的」这种前文，
+  // 也有「买苹果会写进提醒里嘛」这种后文。先按句号/逗号切成小分句，
+  // 取**同时含时间词和提醒动词**的那一小句，再从动词后取内容。
+  const pieces = body
+    .split(/[。！？!?\n；;]/)
+    .flatMap((line) => line.split(/[，,]/))
+    .map((one) => one.trim())
+    .filter(Boolean)
+  const timed = pieces.filter((one) => one.includes(when.matched))
+  const target = timed.find((one) => intentRe.test(one)) || timed[0] || body
+  let rest = target.replace(when.matched, ' ')
+  // 只剥到第一个提醒动词为止：前面的「要求 / 你给我定个」都是指令壳。
+  rest = rest.replace(/^.*?(?:提醒我|叫我|记得|别忘了?|提醒)[，,：:\s]*/, '')
+  rest = rest.replace(/^(?:你|我|给我|帮我|请|要求|要|定个|设个|定一个|设一个|一个)+[，,：:\s]*/, '')
+  rest = rest.replace(/^[，,：:\s]+/, '').replace(/[，,：:\s]+$/, '').trim()
+  // 「提醒我，明天9点，带文件」这种时间单独占一个分句：正文在相邻分句里。
+  if (!rest) {
+    const at = pieces.indexOf(target)
+    const neighbour = [pieces[at + 1], pieces[at - 1]]
+      .find((one) => one && !one.includes(when.matched) && !intentRe.test(one))
+    if (neighbour) rest = neighbour
+  }
+  // 目标分句里没有正文时，退回整句去掉时间，至少别丢掉用户原话。
+  if (!rest && target === body) rest = body.replace(when.matched, '').trim()
   if (!rest) rest = '时间到了'
   return { at: when.at, text: rest.slice(0, 180), ms: when.ms, matched: when.matched, label: when.label }
 }
@@ -300,7 +319,20 @@ export class Reminders {
       createdAt: this.now(),
     }
     this.data.items.push(item)
-    this.data.items = this.data.items.slice(-100)
+    // 条数上限只裁「已经发过的历史」，不能裁没发出去的提醒。
+    // 以前是无差别 slice(-100)：攒到第 101 条时，最老的那条未发送提醒会静默消失，
+    // 用户到点等不到，日志里也没有任何记录。
+    if (this.data.items.length > 100) {
+      const pending = this.data.items.filter((row) => !row.sent)
+      const sent = this.data.items.filter((row) => row.sent)
+      const room = Math.max(0, 100 - pending.length)
+      const keep = room > 0 ? sent.slice(-room) : []
+      this.data.items = [...keep, ...pending].sort((a, b) => {
+        const left = Number(a.createdAt) || Number(a.at) || 0
+        const right = Number(b.createdAt) || Number(b.at) || 0
+        return left - right
+      })
+    }
     this.save()
     return { ok: true, item }
   }

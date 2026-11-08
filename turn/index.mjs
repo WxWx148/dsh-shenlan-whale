@@ -18,9 +18,9 @@ import { SCOPE, conversationOf } from '../facts/index.mjs'
 import { BurstLedger } from '../decide/index.mjs'
 import { card } from '../voice/index.mjs'
 import { memoryCommand } from '../mind/index.mjs'
-import { openUrl, readCurrent, clickIndex, typeInto, closeSession, formatPage, screenshot } from '../ability/index.mjs'
+import { openUrl, readCurrent, clickIndex, typeInto, closeSession, formatPage, screenshot, loadStickers, pickSticker } from '../ability/index.mjs'
 import { readFileSync, writeFileSync, existsSync, unlinkSync, statSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describeAt, parseReminder } from '../life/index.mjs'
 import { searchWeb, readWeb, lastNetDenied } from '../ability/index.mjs'
@@ -218,11 +218,13 @@ function relaxJson(raw) {
 export function parseToolCalls(text) {
   const body = String(text || '')
   const out = []
-  const re = /\[tool:([^\]\n]{1,40})\]/g
+  // 模型偶尔会把调用写成 `[code_read] {...}`（少了 tool:），旧正则认不出，
+  // 整行就原样发到聊天框里。第二种形式只认小写英文工具名，且排除 [split]。
+  const re = /\[tool:([^\]\n]{1,40})\]|\[([a-z][a-z0-9_]{2,39})\]/g
   let match
   while ((match = re.exec(body)) !== null) {
-    const name = String(match[1] || '').trim()
-    if (!name) continue
+    const name = String(match[1] || match[2] || '').trim()
+    if (!name || name === 'split') continue
     let cursor = re.lastIndex
     while (cursor < body.length && /\s/.test(body[cursor])) cursor += 1
     let args = {}
@@ -349,6 +351,7 @@ export function buildPrompt(input = {}) {
   const intentRule = String(input.intentRule || '').trim()
   const emptyAt = input.emptyAt === true
   const selfName = String(persona.name || '深蓝')
+  const selfId = String(input.selfId || '').trim()
   const at = Number(input.at) || Date.now()
 
   // ── 静态段 / 动态段分开拼 ───────────────────────────────────
@@ -372,6 +375,9 @@ export function buildPrompt(input = {}) {
   if (soul) staticLines.push(`你是谁（这是你自己的设定，照着做）：\n${soul}`)
   else if (fallback) staticLines.push(`你是谁：${fallback}`)
   staticLines.push(`你的名字：${selfName}`)
+  if (selfId) {
+    staticLines.push(`你的 QQ 号是 ${selfId}。别人说到这个号就是在说你，不是群友；不要把它当成别人，也不要 @ 自己。`)
+  }
   if (persona.ownerName) staticLines.push(`你称呼用户：${persona.ownerName}`)
   if (guide) staticLines.push(guide)
   // 学到手感：从真实聊天里量出来的差距，不是写死的规矩。
@@ -380,6 +386,9 @@ export function buildPrompt(input = {}) {
   if (habit) staticLines.push(habit)
   staticLines.push('【行动规则】用户让你做事时，不要先用“我去/马上/这就去/试试”答应。必须直接输出工具调用行，格式是 [tool:工具名] {"参数":"值"}，系统执行后会把结果给你，你再回复。只有不需要动手时才正常聊天。' +
     '一件事需要几步时，可以在同一条回复里连着写几行，一行一个工具：先搜再记就写两行，系统会按顺序都执行，然后把每一条的结果一起给你。一次最多 4 行。')
+  staticLines.push('要真的 @ 人必须用 at_person 工具；在正文里手写“@名字”不会变成真 @，尤其不要 @ 自己。')
+  staticLines.push('说错了要撤回，用 withdraw_message：只能撤自己 2 分钟内、当前会话最近一条；不能撤别人的、旧消息或跨会话消息。想演示“发一句再撤”，传 {"next":true}，系统会在这一条发出后自动撤回。')
+  staticLines.push('撤回可以由你自己判断：发现自己刚说错、重复、发错话，直接调用 withdraw_message，不用等主人开口；边界仍以工具校验为准。')
   staticLines.push('直接回一句话，不要解释你在做什么。')
   staticLines.push('如果这句话配表情更自然，可以在末尾加 [表情:标签]；不确定就不加。')
   // 「发小黄脸」关掉时，这一行不能再出现：提示词教了一条走不通的路，
@@ -514,11 +523,13 @@ export function buildPrompt(input = {}) {
     for (const row of recent) {
       // 群里不止一个人：只写「对方」会把三个人的话揉成一个人说的
       const who = row?.from === 'self' ? selfName : String(row?.name || '对方')
+      const whoId = row?.from === 'self' ? '' : String(row?.uin || '')
+      const whoLabel = who + (whoId ? `（QQ ${whoId}）` : '')
       const text = defuse(String(row?.text || '').slice(0, 120))
       // 带上「多久以前」：一句话是十分钟前还是昨晚说的，回法完全不一样
       const when = row?.at ? `[${timeAgo(row.at, at)}] ` : ''
-      if (text) dynamicLines.push(`${when}${who}：${text}`)
-      if (row?.image) dynamicLines.push(`${who}：[图片] ${String(row.image).slice(0, 200)}`)
+      if (text) dynamicLines.push(`${when}${whoLabel}：${text}`)
+      if (row?.image) dynamicLines.push(`${whoLabel}：[图片] ${String(row.image).slice(0, 200)}`)
     }
   }
 
@@ -526,11 +537,13 @@ export function buildPrompt(input = {}) {
   // 内容一个字没少，只是从「开头」挪到「贴着用户这句话」——模型反而更容易把时间用上。
   dynamicLines.push(`现在是 ${nowText(at)}。`)
   const who = String(event.payload?.senderName || event.from || '')
+  const whoId = String(event.from || '')
+  const whoLabel = who + (whoId && whoId !== 'self' ? `（QQ ${whoId}）` : '')
   dynamicLines.push('')
   if (emptyAt) {
-    dynamicLines.push(`${who || '对方'}只 @ 了你，没打字。结合上面的对话接一句自然的话，别问「怎么了」，也别复述刚才的话。`)
+    dynamicLines.push(`${whoLabel || '对方'}只 @ 了你，没打字。结合上面的对话接一句自然的话，别问「怎么了」，也别复述刚才的话。`)
   } else {
-    dynamicLines.push(who ? `${who}说：${defuse(event.payload?.text || '')}` : `对方说：${defuse(event.payload?.text || '')}`)
+    dynamicLines.push(who ? `${whoLabel}说：${defuse(event.payload?.text || '')}` : `对方说：${defuse(event.payload?.text || '')}`)
   }
   // 能力事实与本次任务规则放在最后：越靠近回答位置，越不容易被长上下文挤掉。
   // 以前这两块没有，模型只能凭「最近这段对话里有没有出现」判断自己能不能做事。
@@ -663,6 +676,10 @@ export class Turn {
     this.attention = input.attention || null
     this.runner = typeof input.runner === 'function' ? input.runner : null
     this.tools = input.tools || null
+    // 「下一条发完就撤回」的一次性标记：模型先调 withdraw_message{next:true}，
+    // 系统把当前这条最终回复发出去后，再按记录里的 messageId 撤回。
+    // 不设这个，模型只能撤上一条，没法演示「发一句再撤」。
+    this.recallNext = new Map()
     this.sleep = typeof input.sleep === 'function' ? input.sleep : (ms) => new Promise((r) => setTimeout(r, ms))
     // 连发合并的计时器。为什么要能注入：
     //   合并窗口是「等对方说完」的估计，真实运行时就是 setTimeout；
@@ -734,6 +751,9 @@ export class Turn {
           return {
             from: row?.from === 'self' ? 'self' : 'other',
             name: String(row?.sender || ''),
+            // 群里同名/改昵称很常见；把 QQ 号带上，模型才能把「刚才 @ 的
+            // 1737401656」和「现在说话的竹筒肥鱼二代」认成同一个人。
+            uin: row?.from === 'self' ? '' : String(row?.from || ''),
             text: text || quote,
             image: this.visionNotes.get(row?.id) || '',
             // 时间要带出去：拼提示词时要用它算「多久以前」
@@ -922,12 +942,13 @@ export class Turn {
     // 同一个会话排队，避免两条回复交叉
     const key = event.conversation
     const prev = this.queue.get(key) || Promise.resolve()
-    const task = prev.then(() => this.#respond(event, decision, at)).catch((error) => ({
-      ok: false,
-      stage: 'respond',
-      error: String(error?.message || error),
-      event,
-    }))
+    const task = prev.then(() => this.#respond(event, decision, at)).catch((error) => {
+      const message = String(error?.message || error)
+      // 还有没被分支接住的异常（例如发送层自己抛）：至少留下可查的一条，
+      // 不能只把 Promise 收成一个没人看的对象。
+      this.runtime.log('turn_failed', { conversation: event.conversation, error: message, stage: 'respond' })
+      return { ok: false, stage: 'respond', error: message, event }
+    })
     this.queue.set(key, task)
     task.finally(() => {
       if (this.queue.get(key) === task) this.queue.delete(key)
@@ -939,9 +960,32 @@ export class Turn {
 
   async #respond(event, decision, at) {
     const started = this.now()
+    // 上一轮如果登记了“发完再撤”却没发出去，不能让它落到这一轮头上。
+    this.recallNext.delete(event.conversation)
     const isOwner = event.scope === 'private' && event.tags?.includes('is_owner')
     const isOwnerTag = event.tags?.includes('is_owner') === true
-    const toolCtx = { event, forwardAll: [], quote: null, files: [] }
+    // 主人明确要「发一句再撤回」的演示：即使模型忘了调工具，也保证这一条
+    // 发出后被撤回；仍只作用于本轮最终回复，不碰历史消息、不跨会话。
+    const recallDemoAsk = isOwnerTag && /(?:测试|试试|演示).{0,16}撤回|撤回功能|发.{0,8}(?:一句|一条|个).{0,20}撤回|发个.{0,12}(?:无意义|无关).{0,20}撤回/.test(String(event.payload?.text || ''))
+    if (recallDemoAsk) {
+      this.recallNext.set(event.conversation, { delayMs: 1500, at: this.now() })
+      this.runtime.log?.('recall_demo_scheduled', { conversation: event.conversation })
+    }
+    const toolCtx = {
+      event,
+      forwardAll: [],
+      quote: null,
+      files: [],
+      // 给 withdraw_message{next:true} 用：只登记「本会话下一条发完就撤」，
+      // 不立刻动任何已有消息。
+      scheduleRecall: (options = {}) => {
+        this.recallNext.set(event.conversation, {
+          delayMs: Math.max(500, Math.min(5000, Number(options.delayMs) || 1200)),
+          at: this.now(),
+        })
+        return { ok: true }
+      },
+    }
 
     // 同一条对方消息不回复两遍。
     //
@@ -1309,7 +1353,7 @@ export class Turn {
         browserMaxPerHour: Number(this.runtime.config.browser?.maxPerHour) || 60,
         browserProfileDir: path.join(this.runtime.dir || '', 'browser-profile'),
         renderBrowserPath: String(this.runtime.config.browser?.path || ''),
-        browserTimeoutMs: 25_000,
+        browserTimeoutMs: 12_000,
         browserMaxChars: 3000,
       }
       const openMatch = briefText.match(/^打开\s+(https?:\/\/\S+)/i)
@@ -1409,7 +1453,11 @@ export class Turn {
         }
       }
       const rawText = String(event.payload?.text || '')
-      if (/发个表情|发表情/.test(rawText)) {
+      // 指令必须从句子开头开始。旧写法 /发个表情|发表情/ 会命中
+      // 「转发聊天记录和存表情包一样…」这种总结句，把它误当收藏指令
+      // （线上就回过一句「这条消息里没有可收藏的图片」）。
+      const isSendStickerCmd = /^(?:(?:给我|帮我)?(?:发个|发)表情)/.test(rawText.trim())
+      if (isSendStickerCmd) {
         const mood = rawText.replace(/^.*?(?:发个表情|发表情)/, '').replace(/^[，,：:\s]+/, '').trim()
         const result = this.tools ? await this.tools.call('send_sticker', { mood }, toolCtx) : null
         if (result?.ok) {
@@ -1424,7 +1472,9 @@ export class Turn {
         await this.#say(event.scope, event, [result?.ok ? result.text : '表情库读不出来'], started)
         return { ok: true, stage: 'sticker_list', event }
       }
-      if (/收藏.*表情|存表情/.test(rawText)) {
+      // 收藏也必须是指令句，不能再匹配「收藏」「存表情」出现在任何位置的句子。
+      const isCollectStickerCmd = /^(?:(?:给我|帮我)?(?:收藏|存)(?:一下|这个|这张|这)?[^。！？\n]{0,16}?表情|把[^。！？\n]{0,20}?存(?:成|为)?表情)/.test(rawText.trim())
+      if (isCollectStickerCmd) {
         const tags = rawText.replace(/^.*?(?:表情)/, '').replace(/^[，,：:\s]+/, '').replace(/^标签(?:是|为)?[：:\s]*/, '').trim()
         const result = this.tools ? await this.tools.call('save_sticker', { tags }, toolCtx) : null
         await this.#say(event.scope, event, [result?.ok ? result.text : (result?.error || '没存成')], started)
@@ -1452,7 +1502,11 @@ export class Turn {
 
     // 换人接话已经过一次「是不是在对我说话」的判定，不再拿概率二次淘汰；
     // 概率只留给同一个人的续聊。
-    if (decision.trigger === 'follow_up' && decision.handoff !== true) {
+    // 主人接着说话不掷骰子：他是在对深蓝说，不是在群里自言自语。
+    // 线上已经出现过主人问「竹筒还会撤回消息？」被 follow_up 概率静默跳过，
+    // 看起来就是「后续不说话了」。
+    const ownerFollowUp = Array.isArray(event.tags) && event.tags.includes('is_owner')
+    if (decision.trigger === 'follow_up' && decision.handoff !== true && !ownerFollowUp) {
       const chance = Math.max(0, Math.min(100, Number(this.runtime.config.group?.followUpChance) || 0))
       if (chance < 100 && Math.random() * 100 >= chance) {
         this.runtime.outcome({ eventId: event.id, behavior: decision.behavior, trigger: 'follow_up_skip', ok: false, reason: '接话概率没中' })
@@ -1559,14 +1613,14 @@ export class Turn {
     }
     // 引用里如果是转发，也要把被引用那段展开（旧版只能展开直接发的转发）
     if (quote?.forwardId && this.channel && typeof this.channel.getForward === 'function') {
-      try { quote.forward = await this.channel.getForward(quote.forwardId, 50) } catch {}
+      try { quote.forward = await this.channel.getForward(quote.forwardId, 50, 1) } catch {}
     }
     if (quote && !quote.text && !(quote.images?.length) && !quote.forwardId && !(quote.forward?.length)) quote = null
     let forwardAll = []
     let forwardFailed = false
     if (event.payload?.forwardId && this.channel && typeof this.channel.getForward === 'function') {
       try {
-        forwardAll = await this.channel.getForward(event.payload.forwardId, 200)
+        forwardAll = await this.channel.getForward(event.payload.forwardId, 200, 1)
       } catch (error) {
         forwardFailed = true
         this.runtime.log('forward_fetch_failed', { eventId: event.id, error: String(error?.message || error).slice(0, 160) })
@@ -1640,6 +1694,33 @@ export class Turn {
       }
       vision = parts.map((text, index) => `图${index + 1}：${text}`).join('\n')
     }
+    // 合并转发里的图片不在 event.payload.images 里；不读的话模型只看到
+    // 一行「[图片]」，就会回「看不到图」。取前两张，连同发送者一起给视觉模型。
+    if (typeof this.runtime.describeImageFile === 'function') {
+      const forwardPics = []
+      for (const row of forwardAll) {
+        for (const pic of Array.isArray(row?.imageItems) ? row.imageItems : []) {
+          if (!pic?.file && !pic?.url) continue
+          forwardPics.push({ pic, sender: String(row?.sender || '') })
+          if (forwardPics.length >= 2) break
+        }
+        if (forwardPics.length >= 2) break
+      }
+      const notes = []
+      for (let i = 0; i < forwardPics.length; i += 1) {
+        const { pic, sender } = forwardPics[i]
+        let resolved = null
+        try {
+          resolved = await resolveImageFile(pic, this.channel, this.runtime.config.images?.maxBytes)
+          if (!resolved.ok) continue
+          const seen = await this.runtime.describeImageFile(resolved.file, userText || '描述这张转发里的图。')
+          if (seen.ok) notes.push(`转发图${i + 1}${sender ? '（' + sender + '发）' : ''}：${seen.text}`)
+        } catch {} finally {
+          if (resolved?.temp) { try { unlinkSync(resolved.file) } catch {} }
+        }
+      }
+      if (notes.length) vision = [vision, ...notes].filter(Boolean).join('\n')
+    }
     if (vision) {
       this.visionNotes.set(event.id, vision)
       while (this.visionNotes.size > 60) this.visionNotes.delete(this.visionNotes.keys().next().value)
@@ -1650,6 +1731,7 @@ export class Turn {
     const allowSticker = this.#allows('send_sticker')
     let prompt = buildPrompt({
       event,
+      selfId: String(this.channel?.selfId || this.runtime.config.channel?.selfId || ''),
       allowFace,
       persona: { ...(this.runtime.config.persona || {}), ownerName: this.runtime.config.identity?.ownerName || '' },
       // 灵魂文件：他/她自己的那份设定。比 config 里的那份优先 ——
@@ -1728,7 +1810,19 @@ export class Turn {
         this.#spend(pending, this.#causeSource(pendingSources), event)
         pending = null
         if (round === 0 && /(查一?下|搜一?下|搜索|打开|看看|收藏|发一?个|发出来|提醒|截图|运行|读一下|记住|上次|以前)/.test(userText)) {
-          const pick = await this.runner('用户要求你做事：' + userText + '\n你刚才只说了：' + body + '\n现在只输出工具调用行，一行一个：[tool:工具名] {"参数":"值"}，要多步就写多行。' + (this.tools.prompt?.({ compact: true }) || '') + '不需要工具就只输出 [none]。', { event, conversation: event.conversation })
+          let pick
+          try {
+            pick = await this.runner('用户要求你做事：' + userText + '\n你刚才只说了：' + body + '\n现在只输出工具调用行，一行一个：[tool:工具名] {"参数":"值"}，要多步就写多行。' + (this.tools.prompt?.({ compact: true }) || '') + '不需要工具就只输出 [none]。', { event, conversation: event.conversation })
+          } catch (error) {
+            // 工具环里的模型失败以前会直接冲出 #respond：用户收不到任何话，
+            // 审计里也没有 turn_failed，下一轮就像「上一条没发生过」。
+            // 与首轮失败同一种收口：记行为、记审计、发一句人话（这句话也会进上下文）。
+            const message = String(error?.message || error)
+            this.runtime.outcome({ eventId: event.id, behavior: decision.behavior, trigger: 'runner_error', ok: false, reason: message, ms: this.now() - started })
+            this.runtime.log('turn_failed', { conversation: event.conversation, error: message, stage: 'tool_pick' })
+            await this.#say(scope, event, card({ error: message }), started)
+            return { ok: false, stage: 'generate', error: message, event }
+          }
           if (pick?.text && /\[tool:/.test(pick.text)) {
             pending = pick
             continue
@@ -1821,7 +1915,16 @@ export class Turn {
         pending = null
         break
       }
-      const next = await this.runner(prompt, { event, conversation: event.conversation, onThought: (text) => this.runtime.noteThought?.({ conversation: event.conversation, text }) })
+      let next
+      try {
+        next = await this.runner(prompt, { event, conversation: event.conversation, onThought: (text) => this.runtime.noteThought?.({ conversation: event.conversation, text }) })
+      } catch (error) {
+        const message = String(error?.message || error)
+        this.runtime.outcome({ eventId: event.id, behavior: decision.behavior, trigger: 'runner_error', ok: false, reason: message, ms: this.now() - started })
+        this.runtime.log('turn_failed', { conversation: event.conversation, error: message, stage: 'tool_round' })
+        await this.#say(scope, event, card({ error: message }), started)
+        return { ok: false, stage: 'generate', error: message, event }
+      }
       pending = next
       pendingSources = sources
       result = next
@@ -1928,17 +2031,24 @@ export class Turn {
     }
     if (stickerWanted && sent && Number(sent.lines) > 0 && this.channel && typeof this.channel.sendImage === 'function') {
       try {
-        const dirs = [path.join(this.runtime.dir || '', 'stickers'), path.join(homedir(), '.dsh', 'qq-fish', 'stickers')]
-        for (const dir of dirs) {
-          let idx = []
-          try { idx = JSON.parse(readFileSync(path.join(dir, 'index.json'), 'utf8')).items || [] } catch {}
-          const match = stickerTag
-            ? idx.find((item) => item.file && (item.labels || []).some((label) => String(label).includes(stickerTag)))
-            : idx[Math.floor(Math.random() * Math.max(1, idx.length))]
-          if (match) {
-            await this.channel.sendImage(scope, scope === 'group' ? event.payload?.groupId : event.from, path.join(dir, match.file))
-            break
-          }
+        // 跟工具走同一套挑选/库存逻辑，不再直接读目录 + 自己 find。
+        // 以前这里发了图既不留痕也不记账，下一轮上下文里完全没有「我发过图」，
+        // 线上就出现「我没发图啊老大」——图已经到对面了，它自己不记得。
+        const match = pickSticker(loadStickers(this.runtime.dir || ''), stickerTag)
+        if (match) {
+          await this.channel.sendImage(scope, scope === 'group' ? event.payload?.groupId : event.from, match.path)
+          this.runtime.noteSelfMessage?.({
+            conversation: event.conversation,
+            scope,
+            text: '[表情包：' + (match.labels.length ? match.labels.join('、') : match.file) + ']',
+            at: this.now(),
+          })
+          this.runtime.log('sticker_sent', {
+            conversation: event.conversation,
+            file: match.file,
+            labels: match.labels,
+            tag: stickerTag,
+          })
         }
       } catch {}
     }
@@ -2180,11 +2290,39 @@ export class Turn {
     // 一句话拆成三条气泡，额度上只算一条回复：第一条记 1，后面记 0。
     // 但 lastAt 每条都更新 —— 条与条之间的间隔仍然按真实发送算。
     let quotaNoted = false
-    const note = (text) => {
+    const note = (text, messageId = '') => {
       const count = quotaNoted ? 0 : 1
       quotaNoted = true
       this.guard.note(this.now(), { scope, conversation: event.conversation, target }, count)
-      this.runtime.noteSelfMessage?.({ conversation: event.conversation, scope, text, at: this.now() })
+      this.runtime.noteSelfMessage?.({ conversation: event.conversation, scope, text, at: this.now(), messageId })
+      // withdraw_message{next:true} 登记过：这一条真正拿到 messageId 后，
+      // 延迟一下再撤。没有 messageId（排队中/发送失败）就放弃，不猜。
+      const pending = this.recallNext.get(event.conversation)
+      if (pending) {
+        this.recallNext.delete(event.conversation)
+        if (messageId) {
+          const timer = setTimeout(async () => {
+            try {
+              await this.channel.recall(messageId)
+              this.runtime.log?.('recall_message', {
+                conversation: event.conversation,
+                messageId: String(messageId),
+                ageMs: pending.delayMs,
+                autonomous: true,
+              })
+            } catch (error) {
+              this.runtime.log?.('recall_failed', {
+                conversation: event.conversation,
+                messageId: String(messageId),
+                error: String(error?.message || error).slice(0, 160),
+              })
+            }
+          }, pending.delayMs)
+          timer.unref?.()
+        } else {
+          this.runtime.log?.('recall_failed', { conversation: event.conversation, error: '发送后没有拿到 messageId' })
+        }
+      }
     }
     // 「这条消息已经回过了」要记在**真的发出去之后**。
     // 先记后发的话，万一发送失败，这条消息就成了一堵假门 ——
@@ -2209,8 +2347,8 @@ export class Turn {
         selfSplit: options.selfSplit === true,
         pace: () => this.guard.delay(this.now()),
         say: async (text) => {
-          await this.channel.say(scope, target, text, { roundKey })
-          note(text)
+          const sentOne = await this.channel.say(scope, target, text, { roundKey })
+          note(text, sentOne?.message_id || sentOne?.data?.message_id || '')
           markReplied()
         },
       })
@@ -2221,12 +2359,13 @@ export class Turn {
     for (const text of texts) {
       const wait = this.guard.delay(this.now())
       if (wait > 0) await this.sleep(wait)
+      let sentOne = null
       try {
-        if (this.channel) await this.channel.say(scope, target, text, { roundKey })
+        if (this.channel) sentOne = await this.channel.say(scope, target, text, { roundKey })
       } catch (error) {
         return { ok: false, lines, error: String(error?.message || error) }
       }
-      note(text)
+      note(text, sentOne?.message_id || sentOne?.data?.message_id || '')
       markReplied()
       lines += 1
     }

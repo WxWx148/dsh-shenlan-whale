@@ -8,9 +8,9 @@
 
 | 位置 | 占位符 | 改成 |
 |---|---|---|
-| `package.json` → `repository` / `homepage` / `bugs` | `xwxw773-debug` | 你的 GitHub 用户名 |
+| `package.json` → `repository` / `homepage` / `bugs` | `WxWx148` | 你的 GitHub 用户名 |
 | `启动NapCat.bat` → `YOUR_QQ` | `YOUR_QQ` | **保持占位符，别填真号**（这是给群友改的模板） |
-| `README.md` → 方式 B 的 clone 地址 | `xwxw773-debug` | 同上 |
+| `README.md` → 方式 B 的 clone 地址 | `WxWx148` | 同上 |
 
 顺手确认一遍没有漏网的隐私（真实 QQ 号、群号、`C:\Users\<你的用户名>`、旧的 `file:` 绝对路径）：
 
@@ -35,11 +35,11 @@ git status --short   # 不该出现 config.json / *.jsonl / _archive
 ```powershell
 git init
 git add .
-git commit -m "feat: 深蓝鲸 0.40.0 首次开源"
+git commit -m "feat: 深蓝鲸 0.46.0 首次开源"
 git branch -M main
 
-git remote add origin https://github.com/xwxw773-debug/W-x-x-W.git
-git remote add gitee  https://gitee.com/xwxw773-debug/W-x-x-W.git
+git remote add origin https://github.com/WxWx148/W-x-x-W.git
+git remote add gitee  https://gitee.com/WxWx148/W-x-x-W.git
 
 git push -u origin main
 git push gitee main
@@ -54,14 +54,14 @@ git push origin main; git push gitee main
 ## 3. 打标签 + Release（群友下载走这里）
 
 ```powershell
-git tag -a v0.40.0 -m "深蓝鲸 0.40.0"
-git push origin v0.40.0; git push gitee v0.40.0
+git tag -a v0.46.0 -m "深蓝鲸 0.46.0"
+git push origin v0.46.0; git push gitee v0.46.0
 
 # 打包给群友直接下载
-Compress-Archive -Path index.js,lib,cordis.patch.yml,package.json,README.md,LICENSE,CHANGELOG.md,CONCEPTS.md,SCHEME.md,UX.md,启动NapCat.bat -DestinationPath dist\dsh-shenlan-whale-0.40.0.zip -Force
+Compress-Archive -Path index.js,base,facts,truth,decide,turn,voice,mind,ability,life,view,channel,lib,cordis.patch.yml,package.json,README.md,ARCHITECTURE.md,CHANGELOG.md,LICENSE,启动NapCat.bat -DestinationPath dist\dsh-shenlan-whale-0.46.0.zip -Force
 ```
 
-GitHub → Releases → Draft a new release → 选 tag `v0.40.0` → 把 zip 拖进去 → 写更新说明（直接抄 CHANGELOG 顶部）。
+GitHub → Releases → Draft a new release → 选 tag `v0.46.0` → 把 zip 拖进去 → 写更新说明（直接抄 CHANGELOG 顶部）。
 Gitee → 发行版 → 同样操作。
 
 > **zip 里的目录结构很重要**：解压后应直接看到 `package.json` 和 `index.js`。
@@ -69,7 +69,7 @@ Gitee → 发行版 → 同样操作。
 
 ## 4. 发到 QQ 群
 
-1. 群文件上传 `dsh-shenlan-whale-0.40.0.zip`，文件名别改（版本号要能看出来）。
+1. 群文件上传 `dsh-shenlan-whale-0.46.0.zip`，文件名别改（版本号要能看出来）。
 2. 用 [QQ群分享文案.md](QQ群分享文案.md) 里的公告发一条，**置顶**。
 3. 群文件说明里贴 GitHub + Gitee 两个地址，写清「GitHub 打不开就用 Gitee」。
 
@@ -89,7 +89,7 @@ npm publish --access public
 
 ## 发布检查清单
 
-- [ ] `xwxw773-debug` 全部替换
+- [ ] `WxWx148` 全部替换
 - [ ] `npm test` 全绿
 - [ ] `git status` 里没有 `config.json` / `*.jsonl` / `_archive` / `.snapshots`
 - [ ] 仓库里有 README / LICENSE / CONTRIBUTING / CHANGELOG

@@ -52,6 +52,9 @@ const PROBE_GAP_MS = 5000
  */
 const RECOVER_AFTER_MS = 120_000
 const QR_GRACE_MS = 6 * 60_000
+// 等扫码/等确认超过这么久还没结果，就不再无限等：自动走重启/密码登录。
+// 二维码本身两分钟就过期；5 分钟足够用户扫，也不至于一晚上卡在登录页。
+const LOGIN_WAIT_FORCE_MS = 5 * 60_000
 const RECOVERY_MAX_PER_HOUR = 2
 const RECOVERY_STATE = 'napcat-recovery.json'
 
@@ -900,13 +903,27 @@ export class NapCatLogin {
     if (downMs < RECOVER_AFTER_MS) return { ok: true, skipped: 'too-early', downMs }
     await this.poll()
     const snapshot = this.snapshot()
-    if (snapshot.online) return { ok: true, online: true, snapshot }
-    const phase = text(snapshot.phase)
-    // 正在等扫码 / 等确认：重启会把用户正要扫的码作废。参考实现也是先看最近有没有二维码。
-    if (['waiting_qr', 'generating_qr', 'scanned', 'qr_blocked'].includes(phase)) {
-      return { ok: true, skipped: 'waiting-login', phase, snapshot }
+    if (snapshot.online) {
+      this.loginWaitSince = 0
+      return { ok: true, online: true, snapshot }
     }
-    if (snapshot.qr?.exists && Number(snapshot.qr.ageMs) < QR_GRACE_MS) {
+    const phase = text(snapshot.phase)
+    const waitingLogin = ['waiting_qr', 'generating_qr', 'scanned', 'qr_blocked'].includes(phase)
+    let forceLogin = false
+    if (waitingLogin) {
+      if (!this.loginWaitSince) this.loginWaitSince = this.now()
+      // 正在等扫码 / 等确认：重启会把用户正要扫的码作废。
+      // 但不能无限等 —— 账号被踢下线后 NapCat 会一直停在二维码页，
+      // 用户不在电脑前就永远不重连（线上卡过 72 分钟）。
+      const waited = this.now() - this.loginWaitSince
+      if (waited < LOGIN_WAIT_FORCE_MS) {
+        return { ok: true, skipped: 'waiting-login', phase, snapshot, waitingMs: waited }
+      }
+      forceLogin = true
+    } else {
+      this.loginWaitSince = 0
+    }
+    if (!forceLogin && snapshot.qr?.exists && Number(snapshot.qr.ageMs) < QR_GRACE_MS) {
       return { ok: true, skipped: 'qr-recent', phase, snapshot }
     }
     const slot = this.#takeRecoverySlot(this.now())
@@ -918,6 +935,8 @@ export class NapCatLogin {
     } catch (error) {
       restarted = { ok: false, error: text(error?.message || error) }
     }
+    // 新进程从零开始等登录；不要在它刚起来时又拿旧的「等了 5 分钟」逼重启。
+    this.loginWaitSince = 0
     // 重启后最多再等 40 秒：够 NapCat 起 Worker、走快速登录；
     // 不够也不把看门狗卡死，下一次 tick 再看。
     for (let i = 0; i < 40; i += 1) {

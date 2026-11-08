@@ -227,6 +227,7 @@ export function toRaw(ev, options = {}) {
   const texts = []
   let atMe = false
   let atAll = false
+  const atOthers = []
   let hasImage = false
   let replyId = ''
   let replySummary = ''
@@ -242,6 +243,8 @@ export function toRaw(ev, options = {}) {
       const qq = String(seg?.data?.qq ?? '')
       if (qq === 'all') atAll = true
       else if (selfId && qq === selfId) atMe = true
+      // 这条消息 @ 了别人：即使还在 follow-up 窗口里，也不该接。
+      else if (qq) atOthers.push(qq)
     } else if (type === 'image') {
       hasImage = true
       images.push({
@@ -293,6 +296,7 @@ export function toRaw(ev, options = {}) {
     payload: {
       groupId: isGroup ? String(ev.group_id ?? '') : '',
       senderName: String(ev.sender?.card || ev.sender?.nickname || ''),
+      atOthers,
       images,
       replyId,
       replySummary,
@@ -337,7 +341,9 @@ export class OneBotChannel {
     // 有上限、有 TTL：断一晚上不能把早上的旧话在晚上一股脑倒出来。
     this.outbox = []
     this.outboxMax = 50
-    this.outboxTtlMs = 5 * 60_000
+    // 生成一条回复可能要一两分钟，再叠加掉线重连；5 分钟太短，
+    // 回复刚生成完就被判过期，用户看到的是「想完就没声了」。
+    this.outboxTtlMs = 20 * 60_000
     this.outboxFlushing = false
     this.onRaw = null // 由 turn 设置：拿到 raw 之后干什么
     this.onReconnect = null // 由 index 设置：连上后补掉线期间漏掉的消息
@@ -413,7 +419,12 @@ export class OneBotChannel {
       // 关不掉就算了，进程退出时自然会断
     }
     this.ws = null
-    for (const [, entry] of this.pending) clearTimeout(entry.timer)
+    // 挂起的发送必须当场结清：以前只 clearTimeout + clear，不发 reject，
+    // 等这些 Promise 的回合会永远挂着（配置改地址触发 stop/start 时最明显）。
+    for (const [, entry] of this.pending) {
+      clearTimeout(entry.timer)
+      try { entry.reject(new Error('通道已停止，这条没发出去')) } catch {}
+    }
     this.pending.clear()
     this.outbox = []
     this.#mark('off')
@@ -942,8 +953,8 @@ export class OneBotChannel {
       .sort((a, b) => a.at - b.at)
   }
 
-  /** 展开合并转发。limit 默认 8；read_forward_more 会要更多 */
-  async getForward(id, limit = 8) {
+  /** 展开合并转发。limit 默认 8；depth>0 时再展开一层嵌套转发 */
+  async getForward(id, limit = 8, depth = 0) {
     const empty = markForwardMeta([], 0, false)
     try {
       const data = await this.sendRaw('get_forward_msg', { id: String(id || '') }, 10000)
@@ -957,13 +968,39 @@ export class OneBotChannel {
         const raw = node?.content ?? node?.message
         const segments = segmentsOf(raw)
         const text = segments.map((seg) => segmentText(seg)).join('').trim()
-        const images = segments.filter((seg) => seg?.type === 'image').length
+        const imageItems = segments.filter((seg) => seg?.type === 'image').map((seg) => ({
+          file: String(seg?.data?.file || ''),
+          url: String(seg?.data?.url || ''),
+          summary: String(seg?.data?.summary || ''),
+        }))
+        const images = imageItems.length
+        const forward = segments.find((seg) => seg?.type === 'forward')
+        const forwardId = String(forward?.data?.id ?? forward?.data?.resid ?? '')
         const time = Number(node?.time) * 1000 || 0
-        return { sender, text, images, time }
+        return { sender, text, images, imageItems, forwardId, time }
       })
+      // 嵌套转发：外层只给了 [嵌套转发]，真正内容在 id 后面。
+      // 只在调用方明确要 depth=1 时多取一层，默认调用（含用例）保持旧口径。
+      if (depth > 0 && rows.some((row) => row.forwardId)) {
+        for (const row of rows.slice()) {
+          if (!row.forwardId || rows.length >= max + 60) continue
+          try {
+            const nested = await this.getForward(row.forwardId, Math.min(60, max), depth - 1)
+            for (const child of nested) {
+              rows.push({
+                ...child,
+                text: '↳ ' + String(child.text || ''),
+                time: child.time || row.time,
+              })
+              if (rows.length >= max + 60) break
+            }
+          } catch {}
+        }
+      }
       // 不再因为 text 为空就整条删掉：图片、表情、@、卡片、嵌套转发
       // 本身也是「这条记录里发生了什么」，删掉之后时间线会出现看不见的空洞。
-      return markForwardMeta(rows, total, total > max)
+      const finalTotal = Math.max(total, rows.length)
+      return markForwardMeta(rows, finalTotal, finalTotal > max)
     } catch {
       return empty
     }
@@ -1094,6 +1131,21 @@ export class OneBotChannel {
     }
   }
 
+  /**
+   * 撤回一条消息。只允许调用方先证明「这是自己刚发的」；
+   * 通道层不做身份判断，只负责调 OneBot 的 delete_msg。
+   */
+  async recall(messageId) {
+    const id = String(messageId || '').trim()
+    if (!id) throw new Error('没有可撤回的消息 id')
+    try {
+      return await this.sendRaw('delete_msg', { message_id: id }, 8000)
+    } catch (error) {
+      this.#noteSendFailure('recall', '', error)
+      throw new Error(friendlySendError(error))
+    }
+  }
+
   /** 发一句话。scope 决定调哪个接口 —— 这是唯一会用到 scope 的地方 */
   /**
    * 发一句话。scope 决定调哪个接口 —— 这是唯一会用到 scope 的地方。
@@ -1141,15 +1193,26 @@ export class OneBotChannel {
       return { ok: false, duplicate: true, message_id: '', text: '', why: dup.reason }
     }
 
+    const action = scope === SCOPE.GROUP ? 'send_group_msg' : 'send_private_msg'
+    const params = scope === SCOPE.GROUP
+      ? { group_id: Number(target) || target, message }
+      : { user_id: Number(target) || target, message }
     try {
-      const result = scope === SCOPE.GROUP
-        ? await this.sendRaw('send_group_msg', { group_id: Number(target) || target, message })
-        : await this.sendRaw('send_private_msg', { user_id: Number(target) || target, message })
+      const result = await this.sendRaw(action, params)
       // 记在真的发出去之后：先记后发的话，万一发送失败，
       // 这条就成了一堵假门 —— 下一条同样的内容会被误拦。
       this.dedupe?.noteText(conversation, raw, roundKey)
       return result
     } catch (error) {
+      const why = String(error?.message || error)
+      // 已经写进 socket、但等不到回执：通常是对面在生成回复时通道断了。
+      // 这条不能直接丢 —— 放进 outbox，等重连后补发；否则用户看到的就是
+      // 「它想了 77 秒，然后什么都没说」。
+      if (/等通道回应超时/.test(why) && this.state() !== 'online' && this.#canQueue(action)) {
+        this.#enqueue(action, params)
+        this.runtime?.log?.('send_requeued', { scope, target, action, error: why.slice(0, 80) })
+        return { ok: true, queued: true, message_id: '', text: raw }
+      }
       this.#noteSendFailure('say', target, error)
       throw new Error(friendlySendError(error))
     }

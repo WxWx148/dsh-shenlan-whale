@@ -402,6 +402,20 @@ export class Runtime {
     const replySummary = String(event.payload?.replySummary || '').slice(0, 300)
     // message_id 是唯一能跟 QQ 对上的键：面板靠它还原引用，补回靠它跨实例去重。
     const messageId = String(event.payload?.messageId || '')
+    // 图片与转发的“位置”必须落盘：以前只存 text，导致用户「先发图、再说收藏」
+    // 时 save_sticker 往上翻事件只看到文字，永远回「没有可收藏的图片」；
+    // 转发同理，合并转发被 burst 合并后 forwardId 丢了，下一轮就只剩空文本。
+    // 只存文件/URL/本地缓存这类可序列化字段，promise 不落盘。
+    const images = Array.isArray(event.payload?.images)
+      ? event.payload.images.slice(0, 3).map((pic) => ({
+          file: String(pic?.file || ''),
+          url: String(pic?.url || ''),
+          summary: String(pic?.summary || '').slice(0, 120),
+          cached: String(pic?.cached || ''),
+          localPath: String(pic?.localPath || ''),
+        })).filter((pic) => pic.file || pic.url || pic.cached || pic.localPath)
+      : []
+    const forwardId = String(event.payload?.forwardId || '')
     return this.events.append({
       kind: 'event',
       id: event.id,
@@ -422,6 +436,8 @@ export class Runtime {
       ...(replyId ? { replyId } : {}),
       ...(replySummary ? { replySummary } : {}),
       ...(messageId ? { messageId } : {}),
+      ...(images.length ? { images } : {}),
+      ...(forwardId ? { forwardId } : {}),
       ...(extra && typeof extra === 'object' ? extra : {}),
     })
   }
@@ -456,6 +472,8 @@ export class Runtime {
       text: body.slice(0, 500),
       sender: '我',
       ...(group ? { group } : {}),
+      // 撤回工具只认这个 id：没有它就无法证明「这是我自己刚发的那条」。
+      ...(String(input.messageId || '') ? { messageId: String(input.messageId) } : {}),
     })
   }
 
@@ -1333,9 +1351,27 @@ export class Runtime {
   /** 当天简报：从事件流直接算，不花模型 token */
   dailyDigest() {
     try {
-      const start = new Date()
-      start.setHours(0, 0, 0, 0)
-      const rows = this.events.read({ limit: 1000 }).rows.filter((row) => Number(row.at) >= start.getTime() && row.kind === 'message')
+      // 跟 status() 用同一个「今天零点」口径，也用同一个可注入时钟：
+      // 写死 new Date() 会让用例与宿主时钟对不上，排查时看到两套「今天」。
+      const since = startOfDay(this.now())
+      // 两个坑一起避开：
+      //   1. 落盘行是 { kind:'event', type:'message' }（见 logEvent），拿 kind 比 'message'
+      //      永远不成立 —— 简报会一直说「今天收到 0 条」；
+      //   2. read({limit:1000}) 只看最新 1000 行，心跳占大头时上午的消息会被挤出窗口，
+      //      计数偏少且没有任何报错。统计必须走全量遍历（Journal.forEach）。
+      const rows = []
+      this.events.forEach((row) => {
+        if (Number(row.at || row.ts) < since) return
+        const kind = String(row.type || row.kind || '')
+        if (kind !== KIND.MESSAGE && kind !== KIND.IMAGE) return
+        // 「今天收到」只算别人发来的。自己发出去的话也在事件流里（noteSelfMessage），
+        // 算进来会把「收发」当成「收到」，活跃群排行也会被自己的回复抬高。
+        if (row.from === 'self') return
+        rows.push(row)
+      })
+      // Journal.forEach 从最新文件往最老文件走；轮转跨过今天时，行序不是时间序。
+      // 「最近几句」要靠这个顺序，统一按 at 升序排一次。
+      rows.sort((a, b) => (Number(a.at || a.ts) || 0) - (Number(b.at || b.ts) || 0))
       const groups = new Map()
       let privateCount = 0
       for (const row of rows) {
@@ -1560,9 +1596,14 @@ export class Runtime {
    */
   close() {
     this.log('shutdown', { uptime: this.now() - this.startedAt })
-    for (const journal of [this.events, this.behaviors, this.audit, this.cot]) {
+    // 五份记录都要关。activities 也是同一个 Journal 底座（构造时开过句柄），
+    // 以前这里漏了它：热重载后旧句柄仍压着 activity.jsonl，备份/搬目录会撞
+    // 「文件正在使用」，而进程里没有任何地方会再关它。
+    for (const journal of [this.events, this.behaviors, this.audit, this.cot, this.activities]) {
       try { journal?.close?.() } catch {}
     }
+    // 记忆的 hits 是节流落盘的：关之前补一次，否则最后一段排序权重会丢。
+    try { this.memory?.close?.() } catch {}
     try { this.sandbox?.close?.() } catch {}
   }
 }

@@ -11,9 +11,21 @@ import { execFile } from 'node:child_process'
 let netPolicy = { allowlist: [], quotaPerHour: 60 }
 const netHits = []
 let lastDenied = ''
+// 搜索返回的站点临时放行：用户点开搜索结果时，不必先把每个新闻站加进白名单。
+// 只放行刚搜到的 host，10 分钟后失效；不是把整个白名单关掉。
+const followedHosts = new Map()
+const FOLLOW_TTL_MS = 10 * 60_000
 
 function pruneHits(now = Date.now()) {
   while (netHits.length && now - netHits[0] >= 3_600_000) netHits.shift()
+  for (const [host, until] of followedHosts) {
+    if (until <= now) followedHosts.delete(host)
+  }
+}
+
+function followHost(url) {
+  const host = hostOf(url)
+  if (host) followedHosts.set(host, Date.now() + FOLLOW_TTL_MS)
 }
 
 function deny(reason) {
@@ -29,6 +41,7 @@ export function configureNet(config = {}) {
     : []
   const quota = Math.max(0, Math.min(500, Number(raw.quotaPerHour ?? 60) || 0))
   netPolicy = { allowlist: list, quotaPerHour: quota }
+  followedHosts.clear()
   lastDenied = ''
   return netStatus()
 }
@@ -56,6 +69,7 @@ function hostOf(url) {
 /** 留空 = 全部不许（与界面、config 注释一致）；支持子域 */
 function domainAllowed(host) {
   if (!host) return false
+  if ((followedHosts.get(host) || 0) > Date.now()) return true
   return netPolicy.allowlist.some((domain) => host === domain || host.endsWith('.' + domain))
 }
 
@@ -165,10 +179,40 @@ export async function readWeb(url, maxChars = 3500) {
 
 /** 把口语化请求压成搜索词；保留引号和 site:，不破坏精确检索 */
 export function normalizeQuery(query) {
-  return String(query || '')
+  const original = String(query || '').trim()
+  let out = original
     .replace(/^(帮我|请|麻烦|你)?\s*(搜一下|搜索一下|搜索|查一下|查找|查查|看看|找一下|找找)\s*/i, '')
     .replace(/[，。！？!?；;]+$/g, '')
     .trim()
+  // 搜索引擎对「最近 / 怎么样了」这类口语词非常敏感：带「最近」的
+  // 「日本股市最近暴跌得怎么样了」会被 Bing 理解成「日本」，返回百科/旅游局。
+  // 只清掉时间填充词和句尾问法，保留实体与事件词。
+  out = out
+    .replace(/(?:最近|最新|目前|现在|今天|今日|这几天|近期)/g, ' ')
+    .replace(/(?:得)?(?:怎么样了?|怎么样|如何|是什么|有什么|吗|呢|啊|吧|了)+\s*$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return out.length >= 2 ? out : original
+}
+
+/** 低价值结果：百科、知道、经验这类聚合页。先排后面，不直接丢。 */
+const LOW_VALUE_HOST = /(^|\.)(baike\.baidu\.com|zhidao\.baidu\.com|jingyan\.baidu\.com|baike\.sogou\.com|baike\.so\.com)$/i
+
+function rankSearchRows(rows, limit) {
+  const good = []
+  const low = []
+  const seen = new Set()
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const url = String(row?.url || '').trim()
+    const title = String(row?.title || '').trim()
+    if (!url || !/^https?:\/\//i.test(url) || !title) continue
+    if (seen.has(url)) continue
+    seen.add(url)
+    let host = ''
+    try { host = new URL(url).hostname.toLowerCase() } catch {}
+    ;(LOW_VALUE_HOST.test(host) ? low : good).push(row)
+  }
+  return [...good, ...low].slice(0, Math.max(1, Number(limit) || 5))
 }
 
 function decodeBingUrl(href) {
@@ -314,25 +358,51 @@ async function searchBrowserQuark(q, limit = 5) {
   }
 }
 
-/** 结构化搜索：Google → 夸克 → 百度 →（都失败）浏览器夸克 → Bing */
+/**
+ * Keenable 免注册搜索：ModSearch 这条增强源用的就是它。
+ * 不装插件、不需要 key；返回的是真正的新闻/行情条目，不是「美」这种字典词。
+ */
+async function searchKeenable(q, limit = 5) {
+  try {
+    const res = await fetch('https://api.keenable.ai/v1/search/public', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-keenable-title': 'DeepSeek Harness' },
+      body: JSON.stringify({ query: q, max_results: Math.max(1, Math.min(10, Number(limit) || 5)) }),
+      signal: AbortSignal.timeout(12_000),
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+    return (Array.isArray(data?.results) ? data.results : []).slice(0, limit).map((row) => ({
+      title: String(row?.title || '').slice(0, 120),
+      url: String(row?.url || ''),
+      snippet: String(row?.snippet || row?.description || '').slice(0, 320),
+    })).filter((row) => row.title && /^https?:\/\//i.test(row.url))
+  } catch {
+    return []
+  }
+}
+
+/** 结构化搜索：Keenable → Google → 夸克 → 百度 →（都失败）浏览器夸克 → Bing */
 export async function searchWebDetailed(query, limit = 5) {
   const q = normalizeQuery(query)
   if (!q) return []
   lastDenied = ''
   if (/^https?:\/\//i.test(q)) {
     const page = await readWeb(q, 4000)
-    return page.ok ? [{ title: page.title || q, url: page.url || q, snippet: page.text.slice(0, 260), text: page.text }] : []
+    return page.ok ? rankSearchRows([{ title: page.title || q, url: page.url || q, snippet: page.text.slice(0, 260), text: page.text }], limit) : []
   }
   // 搜索引擎的目标域名由代码写死，但「能不能用」按白名单来：
   // 界面里点开 cn.bing.com，Bing 这一路才真的会发请求。
   const providers = [
+    // 免注册增强源：不算「用户要访问的站点」，只要联网没被总关就允许。
+    { host: 'api.keenable.ai', run: searchKeenable, free: true },
     { host: 'www.google.com', run: searchGoogle },
     { host: 'quark.sm.cn', run: searchBrowserQuark },
     { host: 'quark.sm.cn', run: searchQuark },
     { host: 'www.baidu.com', run: searchBaidu },
     { host: 'cn.bing.com', run: searchBing },
   ]
-  const usable = providers.filter((one) => domainAllowed(one.host))
+  const usable = providers.filter((one) => one.free ? netPolicy.allowlist.length > 0 : domainAllowed(one.host))
   if (!usable.length) {
     deny(netPolicy.allowlist.length
       ? '联网白名单里没有放行任何搜索引擎，搜不了；去设置里加 cn.bing.com 或 www.baidu.com'
@@ -343,7 +413,11 @@ export async function searchWebDetailed(query, limit = 5) {
     const gate = takeSlot()
     if (!gate.ok) return []
     const rows = await provider.run(q, limit)
-    if (rows.length) return rows
+    const ranked = rankSearchRows(rows, limit)
+    if (ranked.length) {
+      for (const row of ranked) followHost(row.url)
+      return ranked
+    }
   }
   return []
 }

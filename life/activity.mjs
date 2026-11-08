@@ -56,7 +56,7 @@ function spend(runtime, result, at, kind) {
  * 跑一轮自主活动。只做三件事：想查什么、真的去查、把查到的记下来。
  *
  * @param {object} input
- * @param {object} input.runtime    运行时（logActivity / logCot / memory）
+ * @param {object} input.runtime    运行时（logActivity / memory）
  * @param {Function} input.runner   生成器（只用来产出搜索词和一句反思）
  * @param {object} [input.config]   配置（取 interests）
  * @param {Function} [input.search] 搜索函数，默认 searchWebDetailed
@@ -106,19 +106,8 @@ export async function runActivityStep(input = {}) {
   const thoughtSpend = spend(runtime, think, now, 'think')
   if (!query) return { ok: false, error: '没有想出要查什么' }
 
-  // 思维链先于联网：先把「打算查什么」落盘，再去查。
-  // 顺序反了，面板上就成了「先看到结果、后看到为什么查」。
-  runtime?.logCot?.({
-    at: now,
-    conversation: 'activity',
-    kind: 'activity',
-    text: String(think?.text || ''),
-    summary: '自主活动：想查「' + query + '」',
-    steps: ['web_search：' + query],
-    source: 'auto',
-    tokens: thoughtSpend.tracked ? thoughtSpend : null,
-  })
-
+  // 自主活动的记录只进活动账本，不再写思维链。
+  // 用户要查的是「它自己找事做时干了什么」，不该和聊天回合的思考混在一起。
   let rows = []
   try {
     rows = await search(query, 3)
@@ -150,7 +139,8 @@ export async function runActivityStep(input = {}) {
   const text = '查了「' + query + '」：' + String(pick.title || '').slice(0, 80) + '。' +
     body.replace(/\s+/g, ' ').slice(0, 260) + (pick.url ? '（' + pick.url + '）' : '')
   runtime?.logActivity?.({ at: now, kind: 'search', text, source: 'auto', tokens: thoughtSpend })
-  runtime?.memory?.rememberSelf?.(text.slice(0, 160))
+  // 查到的网页原文只进活动账本，不直接写进自我认知。
+  // 自我认知应该记「我怎么看」，不是「百度百科说」；下面 reflectText 才写。
 
   // 反思只基于刚查到的原文；查不到就不反思，免得替它编一段经历。
   let reflect = null
@@ -165,19 +155,11 @@ export async function runActivityStep(input = {}) {
   // 反思有没有写出文字都要记：模型已经跑过一次，钱不会因为「没话说」而退回。
   const reflectSpend = spend(runtime, reflect, now, 'reflect')
   if (reflectText) {
-    // 反思也是一次真花钱的推理，同样要落一条：只把它写进活动日志，
-    // 面板的思维链上就只剩「想查什么」一半，另一半开销查无实据。
-    runtime?.logCot?.({
-      at: now,
-      conversation: 'activity',
-      kind: 'activity',
-      text: reflectText,
-      summary: '自主活动：查完之后',
-      steps: [],
-      source: 'auto',
-      tokens: reflectSpend.tracked ? reflectSpend : null,
-    })
+    // 活动记录只留在活动账本里；思维链只放聊天回合的思考。
     runtime?.logActivity?.({ at: now, kind: 'reflect', text: reflectText, source: 'auto', tokens: reflectSpend })
+    // 活动反思只留在活动账本里，不写自我认知。
+    // 反思提示词会追问「这段讲了什么、下次查什么」，写进 self 仍然是网页内容；
+    // 自我认知只保留真正的人设判断，不由一次搜索自动生成。
   }
 
   const mark = String(reflect?.text || '').match(/\[\[next:\s*(\d+)\s*([mh])\]\]/i)

@@ -102,11 +102,16 @@ export function mergeTexts(messages, options = {}) {
     const text = String(item?.text ?? '').trim()
     if (!text) continue
     parts.push(text)
-    if (parts.length >= maxMerged) break
   }
   if (!parts.length) return ''
+  // 超过上限时只合并、不丢弃：把尾巴全部接进最后一条。
+  // 以前这里是 `break`，第 7 条起直接消失 —— 而文件头写的是「合并不是丢弃」，
+  // 对方连发一段长话时，模型会拿着缺了后半段的上下文回答。
+  if (parts.length <= maxMerged) return parts.join('\n')
+  const head = parts.slice(0, maxMerged - 1)
+  const tail = parts.slice(maxMerged - 1)
   // 用换行连 —— 真人连发时看起来就是好几行，不是拼成一句长话
-  return parts.join('\n')
+  return [...head, tail.join('\n')].join('\n')
 }
 
 /**
@@ -219,10 +224,37 @@ export class BurstLedger {
     const first = list[0]
     if (!first) return null
     const texts = list.map((one) => String(one?.payload?.text || '')).filter(Boolean)
-    if (texts.length <= 1) return first
+    // 连发里可能夹着图片、转发卡片：以前只取 first.payload，后一条的 images /
+    // forwardId 全丢，于是「先打字再发图/转发」在当前轮里等于没发过。
+    const images = []
+    const files = []
+    const seenImage = new Set()
+    let forwardId = ''
+    for (const one of list) {
+      const payload = one?.payload || {}
+      for (const pic of Array.isArray(payload.images) ? payload.images : []) {
+        const key = String(pic?.file || pic?.url || '')
+        if (!key || seenImage.has(key)) continue
+        seenImage.add(key)
+        images.push(pic)
+      }
+      if (Array.isArray(payload.files)) files.push(...payload.files)
+      if (!forwardId && payload.forwardId) forwardId = String(payload.forwardId)
+    }
+    // 只有「一条文字、也没有任何图片/文件/转发」才是真的无事可合。
+    // 以前 texts.length<=1 就提前返回，恰好把「文字 + 图片/转发」丢掉。
+    if (texts.length <= 1 && !images.length && !files.length && !forwardId) return first
     return {
       ...first,
-      payload: { ...first.payload, text: mergeTexts(texts) },
+      payload: {
+        ...first.payload,
+        // mergeTexts 读的是消息对象的 text 字段；以前传的是 texts 字符串数组，
+        // 于是一次合并后正文永远是空串 —— 事件里三条都在，当前这轮却像没听见。
+        text: mergeTexts(list.map((one) => ({ text: String(one?.payload?.text || '') }))),
+        ...(images.length ? { images } : {}),
+        ...(files.length ? { files } : {}),
+        ...(forwardId ? { forwardId } : {}),
+      },
       // 记下合并了几条：后面要能查「这条回复是攒了几条想出来的」
       burstCount: texts.length,
     }

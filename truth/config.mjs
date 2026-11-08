@@ -36,6 +36,9 @@ export const DEFAULTS = Object.freeze({
   // 以前 host.mjs 已经在读它们，但它们既不在 DEFAULTS 也不在面板 ——
   // 用户照着错误提示去 config.json 里手填，下一次 migrate() 会把它当未知键丢掉。
   // 所以这里必须登记，面板的「模型」组也必须能改。
+  // 默认档：开启时忽略下面两项，固定用 deepseek-account / deepseek-flash。
+  // 关闭后按下面两项；两项都空则跟随宿主当前对话模型。
+  modelFollowDefault: true,
   modelProvider: '',
   model: '',
 
