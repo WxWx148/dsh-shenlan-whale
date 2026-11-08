@@ -38,8 +38,8 @@ git add .
 git commit -m "feat: 深蓝鲸 0.46.0 首次开源"
 git branch -M main
 
-git remote add origin https://github.com/WxWx148/W-x-x-W.git
-git remote add gitee  https://gitee.com/WxWx148/W-x-x-W.git
+git remote add origin https://github.com/WxWx148/dsh-shenlan-whale.git
+git remote add gitee  https://gitee.com/WxWx148/dsh-shenlan-whale.git
 
 git push -u origin main
 git push gitee main

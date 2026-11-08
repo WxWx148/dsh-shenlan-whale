@@ -58,7 +58,7 @@
 ### 方式 B：从仓库安装（想跟更新的）
 
 ```powershell
-git clone https://github.com/WxWx148/W-x-x-W.git D:\dsh-shenlan-whale
+git clone https://github.com/WxWx148/dsh-shenlan-whale.git D:\dsh-shenlan-whale
 ```
 
 然后在设置 → 插件里填 `file:D:\dsh-shenlan-whale`，或在 profile 的 `package.json` 里加依赖（见方式 C）。

@@ -25,7 +25,7 @@
 ▸ 详细步骤看 README 的「第一次配置」，大约 10 分钟。
 
 ▸ 源码（想改、想看实现的来）
-  GitHub：https://github.com/WxWx148/W-x-x-W
+  GitHub：https://github.com/WxWx148/dsh-shenlan-whale
 
 ▸ 先说清楚
   · 个人项目，接口会变，升级前看 CHANGELOG

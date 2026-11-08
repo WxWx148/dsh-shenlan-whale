@@ -85,10 +85,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/WxWx148/W-x-x-W.git"
+    "url": "git+https://github.com/WxWx148/dsh-shenlan-whale.git"
   },
-  "homepage": "https://github.com/WxWx148/W-x-x-W#readme",
+  "homepage": "https://github.com/WxWx148/dsh-shenlan-whale#readme",
   "bugs": {
-    "url": "https://github.com/WxWx148/W-x-x-W/issues"
+    "url": "https://github.com/WxWx148/dsh-shenlan-whale/issues"
   }
 }

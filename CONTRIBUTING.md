@@ -8,7 +8,7 @@
 - NapCat（想在真机上验证 QQ 通道才需要）
 
 ```powershell
-git clone https://github.com/WxWx148/W-x-x-W.git
+git clone https://github.com/WxWx148/dsh-shenlan-whale.git
 cd dsh-shenlan-whale
 npm test
 ```
