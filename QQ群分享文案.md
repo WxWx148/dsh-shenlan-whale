@@ -7,7 +7,7 @@
 ## 一、群公告（置顶）
 
 ```
-【深蓝鲸 0.46.0 开源了】
+【深蓝鲸 0.46.6 开源了】
 
 一个能住进 QQ 的人格体插件：有记忆、有语气、有作息，不是问答机器人。
 跑在自己的电脑上，聊天记录和记忆都存本地，不经过我的服务器。
@@ -18,7 +18,7 @@
   · NapCat（QQ 协议端，装一次就好）
 
 ▸ 怎么装
-  1. 群文件下载 dsh-shenlan-whale-0.46.0.zip，解压到固定位置（例如 D:\dsh-shenlan-whale）
+  1. 群文件下载 dsh-shenlan-whale-0.46.6.zip，解压到固定位置（例如 D:\dsh-shenlan-whale）
   2. DSH 里打开「设置 → 插件」，安装源填：file:D:\dsh-shenlan-whale
   3. 重启 DSH，侧边栏出现「深蓝鲸」就好了
 
@@ -38,7 +38,7 @@
 ## 二、群文件说明（上传 zip 时填）
 
 ```
-深蓝鲸 0.46.0（DSH 插件，Windows）
+深蓝鲸 0.46.6（DSH 插件，Windows）
 解压后把「设置 → 插件」的安装源填成 file:<你解压的绝对路径>
 需要另外装 NapCat 和 DSH 桌面版，步骤见 README.md
 升级：删掉旧目录，解压新的，重启 DSH；配置和记忆在 %USERPROFILE%\.dsh\shenlan-whale 里，不会被覆盖

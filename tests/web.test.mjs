@@ -11,7 +11,7 @@
 
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { readWeb, configureNet } from '../ability/index.mjs'
+import { readWeb, configureNet, normalizeQuery } from '../ability/index.mjs'
 
 let passed = 0
 const failed = []
@@ -25,6 +25,11 @@ async function check(name, fn) {
     console.log(`  ✗ ${name}\n    ${error?.message ?? error}`)
   }
 }
+
+await check('搜索词：说“谷歌一下/Google”不会把前缀带进查询', () => {
+  assert.equal(normalizeQuery('谷歌一下 曼联 比赛'), '曼联 比赛')
+  assert.equal(normalizeQuery('Google 显卡 价格'), '显卡 价格')
+})
 
 const CHUNK = 'x'.repeat(64 * 1024)
 let written = 0

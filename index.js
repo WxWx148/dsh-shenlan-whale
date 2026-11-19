@@ -233,7 +233,19 @@ export function apply(ctx) {
     // 顺手把群名刷一遍：连上之后才知道「123456 这个群叫什么」，
     // 面板上就不必先把群号摆出来再换名。
     channel.refreshGroups({ force: true }).catch(() => {})
-    return backfillMissed({ runtime, channel, since, until: at, log }).catch((error) => {
+    const owner = String(runtime.config.identity?.ownerId || '')
+    return backfillMissed({
+      runtime,
+      channel,
+      since,
+      until: at,
+      log,
+      onRestored: (event) => {
+        // 只补主人私聊：群聊补回来的旧消息不该在几小时后突然被回复。
+        if (!turn || !owner || event?.scope !== 'private' || String(event.from || '') !== owner) return
+        void turn.handle(event).catch((error) => log('[whale] 主人私聊补回后回复失败：' + String(error?.message || error)))
+      },
+    }).catch((error) => {
       log('[whale] 掉线补回失败：' + String(error?.message || error))
       return { ok: false, error: String(error?.message || error) }
     })
@@ -245,6 +257,10 @@ export function apply(ctx) {
    * 等于替他做安全决定；上游那版会自动批，代价是群可能被拉进广告号。
    * 这里只做「告诉他有人找」这一件事，点头的动作留给人。
    */
+  // 待处理的入群邀请/加群申请。QQ 的 flag 很长，给主人一个短编号，
+  // 回复「同意加群 01」就能批，不用把 flag 抄一遍。
+  const pendingGroupRequests = new Map()
+  let groupRequestSeq = 0
   const notifyOwnerOfRequest = (raw) => {
     const owner = String(runtime.config.identity?.ownerId || '')
     const req = raw?.payload?.request
@@ -253,7 +269,58 @@ export function apply(ctx) {
     const what = isGroup ? `有人申请进群 ${req.groupId ?? ''}` : '有人申请加好友'
     const comment = String(req.comment || '').trim()
     const line = `${what}（QQ ${req.userId || '未知'}）${comment ? '。附言：' + comment.slice(0, 80) : '。没有附言'}`
-    void outbound('private', owner, `${line}\n要同意的话去 QQ 里点一下 —— 这一步我不代劳。`).catch(() => {})
+    if (!isGroup) {
+      void outbound('private', owner, `${line}\n好友申请去 QQ 里点一下。`).catch(() => {})
+      return
+    }
+    groupRequestSeq += 1
+    const ref = String(groupRequestSeq).padStart(2, '0')
+    pendingGroupRequests.set(ref, {
+      flag: String(req.flag || ''),
+      subType: String(req.subType || 'add'),
+      groupId: String(req.groupId || ''),
+      userId: String(req.userId || ''),
+      at: Date.now(),
+    })
+    void outbound('private', owner, `${line}\n回复「同意加群 ${ref}」或「拒绝加群 ${ref}」（10 分钟内有效）。`).catch(() => {})
+  }
+
+  /** 主人在私聊/群里批入群请求；不把 flag 暴露给模型。 */
+  const takeGroupRequestReply = async (raw) => {
+    if (raw?.kind !== KIND.MESSAGE) return false
+    const owner = String(runtime.config.identity?.ownerId || '')
+    if (!owner || String(raw.from || '') !== owner) return false
+    const text = String(raw.payload?.text || '').trim()
+    const match = text.match(/^(同意|拒绝)\s*加群(?:\s*(\d{1,3}))?$/)
+    if (!match) return false
+    const approve = match[1] === '同意'
+    let ref = match[2] || ''
+    if (!ref) {
+      // 没写编号就取最近一条未过期的请求
+      const latest = [...pendingGroupRequests.entries()]
+        .filter(([, row]) => Date.now() - row.at <= 10 * 60_000)
+        .sort((a, b) => b[1].at - a[1].at)[0]
+      ref = latest?.[0] || ''
+    }
+    // 过期的清掉
+    for (const [key, row] of pendingGroupRequests) {
+      if (Date.now() - row.at > 10 * 60_000) pendingGroupRequests.delete(key)
+    }
+    const pending = pendingGroupRequests.get(ref)
+    if (!pending) {
+      await outbound('private', owner, '没有这个入群请求，可能已经过期或被处理了。').catch(() => {})
+      return true
+    }
+    try {
+      if (typeof channel.setGroupRequest !== 'function') throw new Error('协议端没接 set_group_add_request')
+      await channel.setGroupRequest(pending.flag, approve, pending.subType)
+      pendingGroupRequests.delete(ref)
+      const word = approve ? '同意了' : '拒绝了'
+      await outbound('private', owner, `已${word}加群请求 ${ref}（群 ${pending.groupId}，QQ ${pending.userId}）。`).catch(() => {})
+    } catch (error) {
+      await outbound('private', owner, `处理加群请求失败：${String(error?.message || error).slice(0, 100)}`).catch(() => {})
+    }
+    return true
   }
 
   /**
@@ -592,10 +659,11 @@ export function apply(ctx) {
       const owner = String(runtime.config.identity?.ownerId || '')
       if (!owner) return
       const file = path.join(dir, 'proactive.json')
-      let state = { day: '', count: 0, lastAt: 0 }
+      let state = { day: '', count: 0, lastAt: 0, recent: [] }
       try { state = { ...state, ...JSON.parse(readFileSync(file, 'utf8')) } } catch {}
       const day = new Date().toDateString()
-      if (state.day !== day) state = { day, count: 0, lastAt: 0 }
+      if (state.day !== day) state = { day, count: 0, lastAt: 0, recent: Array.isArray(state.recent) ? state.recent.slice(-10) : [] }
+      if (!Array.isArray(state.recent)) state.recent = []
       if (state.count >= (cfg.perDay ?? 3)) return
       // 节奏闸：间隔没到、或者到点了这轮忍住，都不说。
       // 每天上限、作息时段、预算这三道闸一个没松 —— 随机只改间隔，不改「能不能说」。
@@ -605,11 +673,60 @@ export function apply(ctx) {
       // 老配置只按固定间隔算：没到固定间隔就不说，保持原来的行为
       if (cfg.intervalMinutes && Date.now() - Number(state.lastAt || 0) < (cfg.intervalMinutes ?? 180) * 60_000) return
       const scene = { morning: '现在是早上，说一句带早安意味的', night: '现在是深夜，说一句轻一点、别吵人的', care: '说一句关心主人身体或心情的', general: '随口说一句' }[cfg.scene] || '随口说一句'
-      const result = await activeRunner('你是深蓝鲸。' + scene + '短话，20-50字，像真人随手发的，不要提问，不要解释。', { conversation: 'private:' + owner })
+      const soulBase = String(runtime.personaText?.() || '').trim()
+      const soulExtra = String(runtime.config.persona?.persona || '').trim()
+      const soul = [soulBase, soulExtra ? `主人写的人设补充（冲突时以这段为准）：\n${soulExtra}` : '']
+        .filter(Boolean).join('\n\n').slice(0, 1200)
+      const interests = (Array.isArray(runtime.config.group?.interests) ? runtime.config.group.interests : [])
+        .map((one) => String(one || '').trim()).filter(Boolean).slice(0, 12).join('、')
+      let recentActivities = []
+      try {
+        recentActivities = (runtime.activities?.read?.({ limit: 6 })?.rows || [])
+          .map((row) => String(row?.text || '').slice(0, 80)).filter(Boolean).slice(0, 4)
+      } catch {}
+      const prior = (Array.isArray(state.recent) ? state.recent : []).slice(-5)
+      const prompt = [
+        `你是${runtime.config.persona?.name || '深蓝鲸'}。${soul ? '这是你自己的设定：\n' + soul : ''}`,
+        `现在是 ${new Date().toLocaleString('zh-CN')}。${scene}。这是你主动开口，不是回话，也不是报时。`,
+        '说你此刻真正想说的、你自己喜欢或正在琢磨的事；可以分享最近看到的东西、自己做过的事、感兴趣的话题。',
+        '不要每次都用“刚泡了杯茶 / 坐在窗边 / 天气如何”这种模板，不要客服腔，不要提问，不要解释。',
+        interests ? `你平时关注：${interests}。` : '',
+        recentActivities.length ? `你最近自己在做：${recentActivities.join('；')}。` : '',
+        prior.length ? `你最近主动说过：${prior.map((one) => '「' + String(one).slice(0, 60) + '」').join('、')}。别重复这些，换一件具体的事。` : '',
+        '写 1-2 句，20-60 字，像随手发出来的；要有具体内容，不要泛泛而谈。',
+      ].filter(Boolean).join('\n')
+      let result = await activeRunner(prompt, { conversation: 'private:' + owner })
+      if (!result || !result.text) return
+      const normText = (text) => String(text || '').replace(/\s+/g, '').replace(/[，。！？、,.!?~～…—]/g, '')
+      const grams = (text) => {
+        const clean = normText(text)
+        const out = new Set()
+        for (let i = 0; i < clean.length - 1; i += 1) out.add(clean.slice(i, i + 2))
+        return out
+      }
+      const tooSimilar = (text) => {
+        const a = grams(text)
+        if (!a.size) return false
+        return prior.some((old) => {
+          const b = grams(old)
+          if (!b.size) return false
+          let hit = 0
+          for (const gram of a) if (b.has(gram)) hit += 1
+          return hit / Math.min(a.size, b.size) >= 0.62
+        })
+      }
+      if (tooSimilar(result.text)) {
+        // 和最近说过的太像：让模型换一件具体的事重写一次；仍像就这轮不说。
+        const retryPrompt = prompt + '\n你刚才写的那句和最近说过的太像了。换一件具体的事，别从天气/泡茶/窗边起头。'
+        result = await activeRunner(retryPrompt, { conversation: 'private:' + owner })
+        if (!result || !result.text || tooSimilar(result.text)) {
+          log('[whale] 主动开口：这句和最近说过太像，跳过')
+          return
+        }
+      }
       // 主动开口是自主推理，不是回话：走自主活动自己的账本，不挂靠思维链。
       // 以前这一路既不写带来源的 cot、也不记 usage，面板上完全看不到这笔消耗。
       const spent = activitySpend(runtime, result, { kind: 'proactive' })
-      if (!result || !result.text) return
       runtime.logActivity?.({
         at: Date.now(),
         kind: 'proactive',
@@ -622,6 +739,7 @@ export function apply(ctx) {
       await outbound('private', owner, result.text)
       state.count += 1
       state.lastAt = Date.now()
+      state.recent = [...prior, String(result.text).slice(0, 160)].slice(-10)
       // 把抽到的间隔一起存下来：重启后不能用新的间隔去比旧的 lastAt，
       // 否则「上次什么时候说的」和「该隔多久」对不上，节奏会乱。
       Object.assign(state, proactiveCadence.markSpoke(state.lastAt))
@@ -1162,15 +1280,49 @@ export function apply(ctx) {
       }
       if (!eligible.length) { saveState(file, { day }); return }
       const target = eligible[0]
-      const topics = [
-        '群里这么安静，最近有什么好玩的事吗',
-        '都潜水呢，出来聊两句',
-        '突然想起个事，你们最近在玩什么',
-        '安静得能听见回声了，来个人说句话',
-      ]
-      const coldText = topics[Math.floor(Math.random() * topics.length)]
+      const selfName = String(runtime.config.persona?.name || '深蓝鲸')
+      const soulBase = String(runtime.personaText?.() || '').trim()
+      const soulExtra = String(runtime.config.persona?.persona || '').trim()
+      const soul = [soulBase, soulExtra ? `主人写的人设补充（冲突时以这段为准）：\n${soulExtra}` : '']
+        .filter(Boolean).join('\n\n').slice(0, 1200)
+      const interests = (Array.isArray(runtime.config.group?.interests) ? runtime.config.group.interests : [])
+        .map((one) => String(one || '').trim()).filter(Boolean).slice(0, 12).join('、')
+      let acts = []
+      try {
+        acts = (runtime.activities?.read?.({ limit: 6 })?.rows || [])
+          .map((row) => String(row?.text || '').slice(0, 80)).filter(Boolean).slice(0, 4)
+      } catch {}
+      const recent = (Array.isArray(state.recent) ? state.recent : []).slice(-3)
+      const prompt = [
+        `你是${selfName}。${soul ? '这是你自己的设定：\n' + soul : ''}`,
+        `群「${target.name || target.id}」已经安静了 ${Math.round((now - (lastByGroup.get(target.id) || now)) / 3_600_000)} 小时。`,
+        '你想主动冒个泡：说你最近真正在想、真正喜欢或正在琢磨的一件具体事，然后抛一个具体的问题给群里。',
+        '不要用“群里好安静 / 都潜水 / 出来聊两句 / 突然想起 / 来个人说句话 / 回声”这种冷场模板；不要提“冷群”两个字。',
+        interests ? `你平时关注：${interests}。` : '',
+        acts.length ? `你最近自己在做：${acts.join('；')}。` : '',
+        recent.length ? `你最近主动说过：${recent.map((one) => '「' + String(one).slice(0, 50) + '」').join('、')}，别重复。` : '',
+        '写 1-2 句，20-60 字，像突然想到就发出来；要有具体内容，不要客服腔。',
+      ].filter(Boolean).join('\n')
+      let generated = await activeRunner(prompt, { conversation: 'group:' + target.id })
+      let coldText = String(generated?.text || '').trim()
+      if (coldText && /群里.*安静|潜水|出来聊两句|突然想起|冷群|回声|来个人说句话/.test(coldText)) {
+        generated = await activeRunner(prompt + '\n你刚才那句又落回冷场模板了。换一件你真正在关注的具体事，说自己的看法。', { conversation: 'group:' + target.id })
+        coldText = String(generated?.text || '').trim()
+      }
+      if (!coldText) {
+        log('[whale] 冷群话题：这次没想出具体的事，跳过')
+        return
+      }
+      const spent = activitySpend(runtime, generated, { kind: 'coldtopic' })
       await outbound('group', target.id, coldText)
-      saveState(file, { day })
+      runtime.logActivity?.({
+        at: now,
+        kind: 'coldtopic',
+        text: '在群里起了个话题：' + coldText.slice(0, 120),
+        source: 'auto',
+        tokens: spent,
+      })
+      saveState(file, { day, recent: [...recent, coldText.slice(0, 160)].slice(-10) })
       log('[whale] 已发冷群话题：' + target.id)
     } catch (error) {
       log('[whale] 冷群话题失败：' + String(error?.message || error))
@@ -1222,6 +1374,64 @@ export function apply(ctx) {
     activeRunner = runner
     turn = new Turn({ runtime, guard, usage, channel, runner, tools, log, typing, attention })
     chat = new Chat({ dir, runtime, usage, runner, tools, now: () => Date.now() })
+
+    // 主人私聊兜底：电脑睡眠/协议端漏推时，WebSocket 可能还在、心跳也还在，
+    // 但那段私聊没有事件。每 60 秒对一次主人私聊历史，只补「睡过去的那段」，
+    // 再交给 turn 正常判断回不回；重复消息由 claimMessage 去重。
+    // 重启后也要能补最近一小时的主人私聊：进程被睡眠/重启时，
+    // 那几条可能根本没进事件流。只回最近一小时，避免把很旧的“人呢”翻出来。
+    let ownerPollAt = Date.now() - 60 * 60_000
+    try {
+      const latestOwner = runtime.events.read({
+        limit: 1,
+        maxScan: 3000,
+        filter: (row) => row?.scope === 'private' && String(row?.from || '') === String(runtime.config.identity?.ownerId || ''),
+      })?.rows?.[0]
+      const at = Number(latestOwner?.at) || 0
+      if (at > ownerPollAt) ownerPollAt = at
+    } catch {}
+    const ownerPollTimer = ticker.every(60_000, 'ownerpoll', async () => {
+      if (!turn || channel.state() !== 'online') return
+      const owner = String(runtime.config.identity?.ownerId || '')
+      if (!owner || typeof channel.getHistory !== 'function') return
+      const now = Date.now()
+      let items = []
+      try {
+        items = await channel.getHistory(`private:${owner}`, { count: 20 })
+      } catch {
+        return
+      }
+      if (!Array.isArray(items) || !items.length) {
+        ownerPollAt = now
+        return
+      }
+      for (const item of items) {
+        const at = Number(item?.at) || 0
+        if (!at || at <= ownerPollAt || at > now + 5_000) continue
+        if (String(item.from || '') !== owner) continue
+        if (!item.messageId) continue
+        const raw = {
+          source: 'channel',
+          kind: Array.isArray(item.images) && item.images.length && !item.text ? 'image' : 'message',
+          scope: 'private',
+          from: owner,
+          text: String(item.text || ''),
+          at,
+          messageId: String(item.messageId),
+          payload: {
+            images: Array.isArray(item.images) ? item.images : [],
+            replyId: String(item.replyId || ''),
+            replySummary: String(item.replySummary || ''),
+            forwardId: String(item.forwardId || ''),
+            messageId: String(item.messageId),
+            senderName: String(item.sender || ''),
+          },
+        }
+        turn.handle(raw).catch((error) => log('[whale] 主人私聊补回失败：' + String(error?.message || error)))
+      }
+      ownerPollAt = now
+    })
+    ownerPollTimer.unref?.()
     // 生成器真的可用时，才把「说话」这几项登记成已实现。
     // 不登记的话技能页会一直说「还没接上」—— 反过来，没接上也绝不假装接上。
     if (runner) runtime.registerTools(['reply', 'split', 'tone'])
@@ -1279,6 +1489,13 @@ export function apply(ctx) {
         log('[whale] 请求提醒没发出去：' + String(error?.message || error))
       }
       // 主人在私聊里回「同意 / 拒绝 理由」= 对一条待确认请求的决定，不是聊天。
+      // 入群请求回复也拦在 turn 之前：flag 只在 index 里，不能交给模型拼。
+      const ownerId = String(runtime.config.identity?.ownerId || '')
+      if (raw?.kind === KIND.MESSAGE && ownerId && String(raw.from || '') === ownerId
+        && /^(?:同意|拒绝)\s*加群/.test(String(raw.payload?.text || '').trim())) {
+        void takeGroupRequestReply(raw)
+        return
+      }
       // 必须拦在 turn 之前：它要解开一个正在 await 的 Promise，晚一步就只剩超时。
       try {
         if (takeApprovalReply(raw)) return

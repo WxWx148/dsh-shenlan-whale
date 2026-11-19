@@ -99,7 +99,7 @@ const HARD_LIMIT = 200
  * 预算卡太紧的话，最后一行（"别用「你说得对」开头"）会被砍掉 ——
  * 截掉的是最该留下的那句。宁可多花几十个 token，也别把规则砍半截。
  */
-const GUIDE_BUDGET = 260
+const GUIDE_BUDGET = 400
 
 /**
  * 「怎么说话」的规则块。
@@ -127,7 +127,7 @@ export function styleGuide(options = {}) {
     //   实测（本机 756 条原始输出）p25=14 字、p50=21 字、p90=38 字，
     //   最长 160 字 —— 模型的自然形态本来就在聊天的范围里，
     //   不需要拿字数去掰它。
-    '- 一条一个念头，别写长句子；想到哪儿说到哪儿，一行一条。',
+    '- 一条消息把意思说完整，语感要连；别为短而断，别在逗号处切成两条。只有确实换了话题才另起一行。',
     // 分条的口径按**实测**写，不按想当然写：
     //   本机真实发言 573 条 / 401 轮，按 5 秒窗口切轮：
     //     1 条 286 轮（71%）· 2 条 74 轮（18%）· 3 条 32 轮（8%）· 4 条以上 9 轮（2%）
@@ -136,12 +136,13 @@ export function styleGuide(options = {}) {
     //   写「多数时候一条就够」才是把实测的分布告诉它。
     //
     // 上限是 2 时不提 3 条 —— 上限之外的东西说出来只会让模型困惑。
-    burstMax >= 3
-      ? `- 想说的多就分开说，最多 ${burstMax} 条，一行一条，第一条先说结论；多数时候一条就够。`
-      : `- 想说的多就分开说，最多 ${burstMax} 条，一行一条，第一条先说结论。`,
+    burstMax >= 2
+      ? `- 多数时候一条就够；真要分也最多 ${burstMax} 条，只有换了话题才分，别把一个意思拆碎。`
+      : '- 一条说完，不要拆成多条。',
     '- 句尾不加句号，逗号和连接词都少用，靠换行断气；不用「…」收尾。',
     '- 语气词该带就带：啊 吧 呢 嘛 呗 啦 哦 哈。',
-    '- 别用「你说得对」「我记下了」开头，别解释自己为什么这么说；说完就停，不加客套收尾。',
+    '- 别用「你说得对」「我记下了」「我认」开头；也别装深沉：不用「这话/这事/这笔账/我有数/我守着/你往下讲/这话不轻/你自己信吗」，正常说「好/知道了/行/我错了/你说/我不想说」。',
+    '- 别端着：不把聊天写成台词或宣言；少用短促判断句、留白和反问制造分量，别每句都像有深意。该说“好/不知道/行/算了/你说得对”就直说；回答具体问题，不升华、不总结、不摆姿态。',
   ]
   if (verbosity === 'brief') lines.push('- 简短点：一句能说完就别两句，别铺开讲。')
   else if (verbosity === 'chatty') lines.push('- 想多说就说，别自己掐掉半句，说完了再停。')
@@ -190,7 +191,12 @@ export function splitBursts(text, options = {}) {
   for (const line of source.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed) continue
-    const parts = splitByMeaning(trimmed, { minHead: MIN_HEAD, minTail: MIN_TAIL })
+    // 默认只在句末标点断，不在逗号处切；模型自己换行才是分条边界。
+    const parts = splitByMeaning(trimmed, {
+      minHead: MIN_HEAD,
+      minTail: MIN_TAIL,
+      commas: options.commas === true,
+    })
     for (const part of parts) pieces.push({ text: part, sep: '' })
     if (pieces.length) pieces[pieces.length - 1].sep = '\n'
   }

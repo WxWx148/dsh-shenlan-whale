@@ -79,7 +79,7 @@ await check('工具表：只有真能跑的才在里面', () => {
     'time', 'calc', 'web_search', 'web_fetch', 'digest', 'exec_sandbox', 'self_tune', 'voice_to_text',
     'image_read', 'file_read', 'code_list', 'code_read', 'code_search', 'code_write', 'code_restore',
     'run_command', 'remind', 'set_reminder', 'memory_search', 'people_lookup', 'thread_summary',
-    'send_sticker', 'list_stickers', 'save_sticker', 'send_face', 'at_person', 'read_forward_more', 'withdraw_message',
+    'send_sticker', 'list_stickers', 'save_sticker', 'send_face', 'leave_group', 'qzone_post', 'at_person', 'read_forward_more', 'withdraw_message',
     'recall', 'remember_fact', 'remember_self', 'revise_self', 'forget_self',
     'read_persona', 'revise_persona', 'absorb_habit', 'persona_versions', 'rollback_persona',
     'remember_person',
@@ -215,6 +215,45 @@ await check('撤回：next:true 只登记下一条，不立刻撤已有消息', 
     assert.equal(out.ok, true)
     assert.equal(scheduled, 1)
     assert.match(out.text, /发出去后会撤回/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+await check('空间说说：面板开关+每日上限真的拦住，发出去才算成功', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'whale-qzone-'))
+  try {
+    const sent = []
+    const runtime = fakeRuntime(dir)
+    runtime.config.qzone = { enabled: true, dailyLimit: 1 }
+    const channel = { sendQzone: async (content) => { sent.push(content) } }
+    const tools = createTools({ ...deps, runtime, channel })
+    const first = await tools.call('qzone_post', { content: '今天天气不错' })
+    assert.equal(first.ok, true)
+    assert.deepEqual(sent, ['今天天气不错'])
+    const second = await tools.call('qzone_post', { content: '再来一条' })
+    assert.equal(second.ok, false)
+    assert.match(second.error, /上限/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+await check('退群工具：只认主人，必须先 confirm，再调通道', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'whale-leave-'))
+  try {
+    const runtime = fakeRuntime(dir)
+    runtime.config.identity = { ownerId: '10001' }
+    const left = []
+    const channel = { leaveGroup: async (id) => { left.push(id) } }
+    const tools = createTools({ ...deps, runtime, channel })
+    const denied = await tools.call('leave_group', { groupId: '123', confirm: true }, { event: { from: '20002' } })
+    assert.equal(denied.ok, false)
+    const noConfirm = await tools.call('leave_group', { groupId: '123' }, { event: { from: '10001' } })
+    assert.equal(noConfirm.ok, false)
+    const done = await tools.call('leave_group', { groupId: '123', confirm: true }, { event: { from: '10001' } })
+    assert.equal(done.ok, true)
+    assert.deepEqual(left, ['123'])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

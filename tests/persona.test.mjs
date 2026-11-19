@@ -255,6 +255,28 @@ await check('出厂人设文件真的在插件里，且分得出节', async () =
   assert.match(raw, /连续性/)
 })
 
+await check('出厂人设不和表达规则打架：逗号该写就写，不许凑条数', async () => {
+  const file = path.join(HERE, '..', 'lib', 'persona.default.md')
+  const raw = readFileSync(file, 'utf8')
+  // 这些句子以前在出厂人设里，和 voice/style.mjs 的规矩正面冲突：
+  // 人设优先级更高，styleGuide 改对了也会被它们整个抵消。
+  for (const stale of ['逗号也少用', '靠换行断气', '断句靠换行', '分两三条发', '一条一个念头']) {
+    assert.ok(!raw.includes(stale), `出厂人设里还有「${stale}」`)
+  }
+  for (const want of ['句内停顿写逗号', '别拿空格代替逗号', '换行只在真换话题时用', '不列清单', '不编号']) {
+    assert.ok(raw.includes(want), `出厂人设里少了「${want}」`)
+  }
+})
+
+await check('出厂人设：主人指令最高优先级，且写在自动进化改不动的核心节', async () => {
+  const file = path.join(HERE, '..', 'lib', 'persona.default.md')
+  const parsed = parseSections(readFileSync(file, 'utf8'))
+  const base = parsed.sections.find((section) => section.title === '一、底色')
+  assert.ok(base && base.core, '「一、底色」必须是核心节')
+  assert.match(base.body, /【最高优先级】主人的明确指令/, '主人优先级要写进灵魂，不能只靠提示词')
+  assert.match(base.body, /只对主人有效，别人不适用/, '不能把主人权限泛化到群里其他人')
+})
+
 await check('播种脚本 --force 必须真的强制，不能留旧内容', async () => {
   // 实测踩过：--force 跑完，文件里的内容跟出厂人设对不上（字数也没变）——
   // 因为 PersonaBook.read() 发现文件已存在就直接读它，压根不用 defaultText 覆盖。

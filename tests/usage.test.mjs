@@ -211,6 +211,22 @@ await check('会计上老账本没有 calls 字段：一条按一次算，不能
   assert.equal(usage.today(BASE).calls, 1)
 })
 
+await check('账本缺当天记录时按审计重算：噪音行不能把翻页截断（否则今天显示 0）', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'usage-noise-'))
+  dirs.push(dir)
+  const journal = new Journal({ dir, name: 'audit', now: () => BASE })
+  // 先写今天的 3 条真账，再用 500 条「没有 at 字段」的噪音把它们挤到第一页之外
+  journal.append({ kind: 'usage', at: BASE - 3600_000, input: 100, output: 10, cost: 0.0002, calls: 1, source: 'chat' })
+  journal.append({ kind: 'usage', at: BASE - 1800_000, input: 100, output: 10, cost: 0.0002, calls: 1, source: 'chat' })
+  journal.append({ kind: 'usage', at: BASE - 600_000, input: 100, output: 10, cost: 0.0002, calls: 1, source: 'chat' })
+  for (let i = 0; i < 500; i += 1) journal.append({ kind: 'channel_state', at: BASE - 60_000 + i })
+  // 账本文件不存在 → data.days 为空 → today() 必须回落到审计逐页翻
+  const usage = new Usage({ config: cfg(), journal, file: path.join(dir, 'usage.json'), now: () => BASE })
+  const today = usage.today(BASE)
+  assert.equal(today.input, 300, '三条真账一条都不能少')
+  assert.equal(today.calls, 3, '次数也不能少')
+})
+
 await check('预算正好用完就算用尽：面板显示「还剩 0」却还在花钱是自相矛盾', () => {
   const usage = new Usage({ config: cfg({ budgetPerDay: 1 }), now: () => BASE })
   // 100000 in + 100000 out = 0.2 + 0.8 = 1.00 元，正好等于预算

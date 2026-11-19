@@ -200,7 +200,8 @@ await check('说话参数：进化值被用户配置封顶，规则块直接可�
   assert.match(guide, /最多 2 条/, '规则块要用进化后的条数')
   assert.match(guide, /群里 1~2 条/)
   assert.match(guide, /想多说就说/, '话多话少要真的进规则块')
-  assert.ok(guide.length <= 260, `规则块不能写成文章，实际 ${guide.length} 字`)
+  // 预算 360 时 brief/chatty 档会被尾部截断，静默丢掉详略规则；抬到 400 后全部规则都在。
+  assert.ok(guide.length <= 400, `规则块不能写成文章，实际 ${guide.length} 字`)
 })
 
 await check('出站：QQ 只给一句话，代码和链接一律不出门', () => {
@@ -214,7 +215,10 @@ await check('出站：QQ 只给一句话，代码和链接一律不出门', () =
     artifact: { kind: 'chart', title: '本周消息量', url: 'file:///D:/secret/a.png' },
   })
   const qq = runtime.outbound(view, 'qq')
-  assert.match(qq, /做好了/)
+  // 产物在 QQ 里只留一句人话，且「做好了」不重复：
+  // 旧文案是「做好了：… · 0.8 秒。做好了，在面板里能看。」，同一句说两遍。
+  assert.match(qq, /在面板里能看/)
+  assert.equal((qq.match(/做好了/g) || []).length, 0, `「做好了」重复了：${qq}`)
   assert.ok(!qq.includes('print'), 'QQ 里不该有代码')
   assert.ok(!qq.includes('语言：'), 'QQ 里不该有细节事实')
   assert.ok(!qq.includes('file:///'), 'QQ 里点不开本地文件，别甩地址')

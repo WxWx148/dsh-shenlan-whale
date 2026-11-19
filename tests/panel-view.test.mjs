@@ -402,7 +402,7 @@ await check('生效徽标：每项都有机器值与中文，要重启的项说�
   const ws = rows.find((row) => row.key === 'channel.wsUrl')
   assert.ok(ws, '连接组少了 wsUrl')
   assert.equal(ws.effect, 'restart')
-  assert.equal(ws.badge, '重启后生效')
+  assert.equal(ws.badge, '改后需重启')
   assert.equal(ws.needRestart, true, '旧字段不能与新徽标打架')
   const live = rows.find((row) => row.effect === 'next')
   assert.ok(live, '全是重启项？常态项也该有「下一轮生效」')
@@ -642,7 +642,8 @@ await check('格式化：不出现 0 秒前 / 0% 这种假精确', () => {
 await check('通道四种状态四种说法，不能混成一句「未连接」', () => {
   assert.equal(channelFace('online').label, '在线')
   assert.equal(channelFace('offline').label, '掉线了')
-  assert.equal(channelFace('unknown').label, '还没连上')
+  assert.equal(channelFace('unknown').label, '连接未响应')
+  assert.equal(channelFace('stale').label, '连接没响应')
   assert.equal(channelFace('off').label, '已关闭')
 })
 

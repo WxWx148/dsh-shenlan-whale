@@ -86,7 +86,14 @@ export const DEFAULTS = Object.freeze({
     followUpSeconds: 180,
     followUpMaxTurns: 5,
     followUpChance: 100,
+    attentionModelJudge: true,
     interests: Object.freeze([]),
+  }),
+
+  // QQ 空间：默认关；打开后才允许模型/主人发说说
+  qzone: Object.freeze({
+    enabled: false,
+    dailyLimit: 2,
   }),
 
   // 记忆与自我
@@ -94,6 +101,9 @@ export const DEFAULTS = Object.freeze({
     enabled: true,
     maxEntries: 8000,
     summaryEvery: 200,
+    // 跨群记忆只在主人私聊里参考，且只读这些群；空 = 不跨群。
+    crossGroups: Object.freeze([]),
+    crossGroupHours: 6,
     net: Object.freeze({ entries: 2, hops: 6, decay: 0.82 }),
   }),
   self: Object.freeze({ enabled: true, rewriteCooldownHours: 48 }),

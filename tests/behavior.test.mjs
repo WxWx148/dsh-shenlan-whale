@@ -59,6 +59,19 @@ await check('群聊叫了名字 → 回话', () => {
   assert.equal(result.trigger, 'name_called')
 })
 
+await check('主人在群里说闭嘴/恢复说话：不 @ 也要进控制分支', () => {
+  const mute = route(make({ scope: SCOPE.GROUP, groupId: '900', from: OWNER, text: '闭嘴' }))
+  assert.equal(mute.behavior, BEHAVIOR.REPLY)
+  assert.equal(mute.trigger, 'owner_group_control')
+  const back = route(make({ scope: SCOPE.GROUP, groupId: '900', from: OWNER, text: '恢复说话' }))
+  assert.equal(back.trigger, 'owner_group_control')
+  const leave = route(make({ scope: SCOPE.GROUP, groupId: '900', from: OWNER, text: '退出群聊 300000002' }))
+  assert.equal(leave.behavior, BEHAVIOR.REPLY)
+  assert.equal(leave.trigger, 'owner_group_control')
+  const stranger = route(make({ scope: SCOPE.GROUP, groupId: '900', from: '20002', text: '闭嘴' }))
+  assert.equal(stranger.behavior, null, '别人说闭嘴不能控制机器人')
+})
+
 await check('群里没点到 → 不行为，但原因说得清（不是「忽略」）', () => {
   const result = route(make({ scope: SCOPE.GROUP, groupId: '900', text: '今晚吃啥' }))
   assert.equal(result.behavior, null)

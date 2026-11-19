@@ -244,6 +244,25 @@ await check('发群消息走 send_group_msg（scope 决定接口）', async () =
   assert.equal(socket.sent[0].params.group_id, 555)
 })
 
+await check('群聊引用回复：replyTo 会变成 reply 段，放在正文前', async () => {
+  const socket = fakeSocket()
+  const channel = new OneBotChannel({
+    config: { channel: { enabled: true, wsUrl: 'ws://127.0.0.1:3001' } },
+    open: () => socket,
+  })
+  channel.start()
+  socket.open()
+  const promise = channel.say('group', '555', '同意，两码事', { replyTo: '123456' })
+  await Promise.resolve()
+  const message = socket.sent[0].params.message
+  assert.ok(Array.isArray(message), '带引用时必须发消息段数组')
+  assert.deepEqual(message[0], { type: 'reply', data: { id: '123456' } })
+  assert.equal(message[1].type, 'text')
+  assert.equal(message[1].data.text, '同意，两码事')
+  socket.emit('message', { echo: socket.sent[0].echo, status: 'ok', retcode: 0, data: { message_id: 2 } })
+  await promise
+})
+
 await check('通道返回失败：promise 要 reject，不能静默当成功', async () => {
   const socket = fakeSocket()
   const channel = new OneBotChannel({
@@ -282,6 +301,56 @@ await check('引用原文：get_msg 返回字符串 CQ 码也认得', async () =
   assert.equal(got.text, '被引用的原话')
   assert.equal(got.images.length, 1)
   assert.equal(got.sender, '老李')
+})
+
+await check('引用图：get_msg 取不到时从本会话历史补回图片', async () => {
+  const channel = new OneBotChannel({ config: { channel: { enabled: true, wsUrl: 'ws://x' } } })
+  channel.sendRaw = async (action) => {
+    if (action === 'get_msg') throw new Error('等通道回应超时')
+    if (action === 'get_group_msg_history') {
+      return {
+        messages: [{
+          message_id: 7336284,
+          time: Math.floor(T0 / 1000),
+          user_id: 400000002,
+          sender: { card: '饕餮龙弑' },
+          message: [{ type: 'image', data: { file: 'quote.jpg', url: 'https://example.com/quote.jpg' } }],
+        }],
+      }
+    }
+    throw new Error('unknown action ' + action)
+  }
+  const got = await channel.getMessage('7336284', { conversation: 'group:300000001' })
+  assert.equal(got.ok, true)
+  assert.equal(got.source, 'history')
+  assert.equal(got.images.length, 1)
+  assert.equal(got.images[0].file, 'quote.jpg')
+  assert.equal(got.sender, '饕餮龙弑')
+})
+
+await check('加群请求：同意/拒绝都走 set_group_add_request，flag 原样带回去', async () => {
+  const channel = new OneBotChannel({ config: { channel: { enabled: true, wsUrl: 'ws://x' } } })
+  const seen = []
+  channel.sendRaw = async (action, params) => { seen.push({ action, params }); return {} }
+  await channel.setGroupRequest('flag-abc', true, 'invite')
+  await channel.setGroupRequest('flag-def', false, 'add')
+  assert.deepEqual(seen, [
+    { action: 'set_group_add_request', params: { flag: 'flag-abc', sub_type: 'invite', approve: true } },
+    { action: 'set_group_add_request', params: { flag: 'flag-def', sub_type: 'add', approve: false } },
+  ])
+})
+
+await check('语音转文字走 QQ 原生 fetch_ptt_text，message_id 必须是数字', async () => {
+  const channel = new OneBotChannel({ config: { channel: { enabled: true, wsUrl: 'ws://x' } } })
+  let seen = null
+  channel.sendRaw = async (action, params) => {
+    seen = { action, params }
+    return { text: '能识别出我说了什么吗？' }
+  }
+  const got = await channel.getVoiceText('715166282')
+  assert.deepEqual(seen, { action: 'fetch_ptt_text', params: { message_id: 715166282 } })
+  assert.equal(got.ok, true)
+  assert.equal(got.text, '能识别出我说了什么吗？')
 })
 
 await check('历史消息：群消息拉回来并归一化，自己的发言剔掉', async () => {

@@ -160,7 +160,6 @@ const RAW_ITEMS = [
     hint: '这是上限。他/她学到习惯之后，实际可能比这个少',
   }),
   text('identity.ownerName', '我的称呼', 'persona', { maxLen: 24 }),
-  text('identity.ownerId', '我的 QQ 号', 'persona', { risk: RISK.HIGH, hint: '改错就没人能下指令了，需要二次确认' }),
 
   // ── 模型 ──────────────────────────────────────────────────────
   // 留空是**合法**的：留空 = 跟着宿主当前对话用的模型走。
@@ -186,7 +185,8 @@ const RAW_ITEMS = [
   num('channel.watchdogMinutes', '掉线多久后处理', 'channel', { min: 1, max: 60, unit: '分钟', hint: '默认 2 分钟；正在等扫码时不会重启' }),
   text('channel.wsUrl', 'OneBot 地址', 'channel', { level: LEVEL.RESTART, placeholder: 'ws://127.0.0.1:3001' }),
   text('channel.token', 'OneBot 令牌', 'channel', { secret: true, level: LEVEL.RESTART, hint: '只显示「已配置 / 未配置」' }),
-  text('channel.selfId', '登录的 QQ 号', 'channel', { level: LEVEL.RESTART, hint: '留空 = 用协议端当前登录的号；多账号时填清楚才会显示对名字' }),
+  text('channel.selfId', '我的 QQ 号（深蓝）', 'channel', { level: LEVEL.RESTART, hint: '深蓝自己登录的号。留空 = 自动跟随 QQ 桥当前登录的号；填了就必须和协议端登录号一致，否则认不出自己的发言' }),
+  text('identity.ownerId', '用户 QQ 号（主人）', 'channel', { risk: RISK.HIGH, hint: '深蓝认准这个号是主人：私聊、指令、撤回确认都靠它。填用户自己的号，不是深蓝的号' }),
 num('channel.maxOutputTokens', '单次最多生成多少 token', 'channel', { min: 256, max: 8000, step: 64, unit: 'token', hint: '思考也算在内；太小会把正文挤没，出现「只想不说」' }),
 num('channel.turnTimeoutMs', '等模型多久', 'channel', { min: 10_000, max: 180_000, step: 5_000, unit: '毫秒', format: 'ms', hint: '超时不再弹「没做成」，改用一句人话兜底' }),
   oneOf('channel.login.mode', '登录方式', 'channel', ['ticket', 'password', 'qr'], {
@@ -195,6 +195,8 @@ num('channel.turnTimeoutMs', '等模型多久', 'channel', { min: 10_000, max: 1
   bool('channel.login.autoQr', '票据失效时自动出二维码', 'channel', {
     hint: '关掉后票据失效不会自动出码，要你在「QQ 连接」里点「改用扫码」才出',
   }),
+  bool('qzone.enabled', '允许发 QQ 空间说说', 'channel', { hint: '打开后，主人可以说“发条说说”，也可由模型调用 qzone_post；默认关闭' }),
+  num('qzone.dailyLimit', '每天最多发几条说说', 'channel', { min: 0, max: 10, unit: '条', hint: '0 = 不发；默认 2' }),
   text('channel.login.password', 'QQ 密码（密码方式用）', 'channel', {
     secret: true,
     hint: '只用于密码方式；存在本机 config.json，不会写进日志。也可填 32 位 MD5。留空表示不修改',
@@ -205,6 +207,7 @@ num('channel.turnTimeoutMs', '等模型多久', 'channel', { min: 10_000, max: 1
   num('guard.perMinute', '每个会话每分钟最多回几条', 'guard', { min: 1, max: 60, hint: '按回复算，不按气泡；一个群刷屏不影响私聊和别的群' }),
   num('group.followUpSeconds', '群聊接话窗口', 'guard', { min: 30, max: 600, unit: '秒', hint: '同一个人接着说的窗口：窗口内不 @ 也接；只对群聊生效' }),
   num('group.followUpMaxTurns', '群聊最多接几轮', 'guard', { min: 1, max: 20, unit: '轮', hint: '同一个人连续接话到上限就关窗，等下一个人 @ 或起新话题' }),
+  bool('group.attentionModelJudge', '换人接话时多问一次模型', 'guard', { hint: '旧窗口还热、但快判据拿不准时，用小模型确认对方是不是在接深蓝；关掉则按原规则不接' }),
   num('group.followUpChance', '群聊接话概率', 'guard', { min: 0, max: 100, step: 5, unit: '%', hint: '命中续聊标签后，按这个概率决定要不要接下一句' }),
   list('group.interests', '感兴趣的内容', 'guard', { hint: '一行一个词；按概念匹配，不要求原词，比如「游戏」也会认出手游、开黑、副本' }),
   num('guard.firstDelayMs', '首条等待下限', 'guard', { min: 0.3, max: 30, step: 0.5, unit: '秒', scale: 1000, hint: '打字台算出的等待不会低于这个值；长回复会更久' }),
@@ -225,6 +228,7 @@ num('channel.turnTimeoutMs', '等模型多久', 'channel', { min: 10_000, max: 1
   }),
   text('guard.nightWindow', '夜间不打扰', 'guard', {
     placeholder: '23:00-07:00',
+    hint: '只压群聊和非主人私聊；主人私聊不受这个窗口影响，凌晨也会回。',
     // 没有格式约束的话，填错了不会报错，只是「夜间静音悄悄失效」—— 最难查的一种
     pattern: /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/,
     patternHint: '23:00-07:00',
@@ -234,6 +238,8 @@ num('channel.turnTimeoutMs', '等模型多久', 'channel', { min: 10_000, max: 1
   bool('memory.enabled', '长期记忆', 'memory'),
   num('memory.maxEntries', '最多记多少条', 'memory', { min: 100, max: 100_000, step: 100 }),
   num('memory.summaryEvery', '多少条总结一次', 'memory', { min: 20, max: 2000, step: 10 }),
+  list('memory.crossGroups', '允许跨群记忆的群号', 'memory', { hint: '留空＝不跨群。只在主人私聊里参考这些群最近的话题，不会把 A 群的话带回 B 群' }),
+  num('memory.crossGroupHours', '跨群记忆看最近几小时', 'memory', { min: 1, max: 72, unit: '小时' }),
   num('memory.net.entries', '检索从几个入口进', 'memory', { min: 1, max: 6 }),
   num('memory.net.hops', '最多跳几层', 'memory', { min: 1, max: 12 }),
   num('memory.net.decay', '每跳衰减', 'memory', { min: 0.5, max: 1, step: 0.01 }),
@@ -301,7 +307,7 @@ num('channel.turnTimeoutMs', '等模型多久', 'channel', { min: 10_000, max: 1
   num('tools.maxRounds', '查得多仔细', 'tools', { min: 0, max: 24, unit: '次', hint: '一轮最多追问几次；0 = 不限（靠日预算和原地打转判定收口）' }),
   num('tools.maxPerRound', '一次能办几件事', 'tools', { min: 1, max: 8, unit: '件', hint: '一件事要分几步办时，一次能同时做几步' }),
   list('net.allowlist', '联网白名单', 'tools', {
-    hint: '留空＝全部不许。加一个域名才放行对应的联网请求，比如 cn.bing.com、www.baidu.com；改完立即生效，可在「数据与调试 → 联网开关试一次」当场验证',
+    hint: '留空＝全部不许。优先放行 www.google.com（搜索默认先走谷歌）；也可加 cn.bing.com、www.baidu.com 兜底。改完立即生效，可在「数据与调试 → 联网开关试一次」验证',
   }),
   num('net.quotaPerHour', '每小时联网次数', 'tools', { min: 0, max: 500, hint: '每小时最多发几次联网请求，0＝不许联网；改完立即生效，不用重启' }),
 

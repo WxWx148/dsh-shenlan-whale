@@ -1,5 +1,5 @@
 /**
- * lib/qqview.mjs — QQ 界面的数据：谁在跟谁聊、在哪聊、聊了什么。
+ * view/qqview.mjs — QQ 界面的数据：谁在跟谁聊、在哪聊、聊了什么。
  *
  * 数据只有一处来源：事件日志。因为收发两条都落在那里
  * （收到的由通道写，自己发的由 runtime.noteSelfMessage 写），

@@ -297,6 +297,7 @@ await check('日预算：超了就真的停下，并且说清为什么', async (
   const NOON = new Date(2026, 10, 7, 12, 0, 0).getTime()
   const dir = mkdtempSync(path.join(tmpdir(), 'budget-'))
   const runtime = new Runtime({ dir, now: () => NOON, config: { identity: { ownerId: 'owner1' } } })
+  runtime.setConfig('guard.mergeWindowMs', 0, { confirm: false })
   const usage = new Usage({ config: runtime.config, journal: runtime.audit, file: path.join(dir, 'usage.json'), now: () => NOON })
   runtime.usage = usage
   const guard = new Guard({ config: runtime.config, now: () => NOON })

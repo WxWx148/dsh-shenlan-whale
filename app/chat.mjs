@@ -1,5 +1,5 @@
 /**
- * lib/chat.mjs — 不依赖 QQ 的独立对话。
+ * app/chat.mjs — 不依赖 QQ 的独立对话。
  *
  * 为什么必须有这一块：
  *   QQ 那条链要协议端、要在线、要扫码。任何一环没通，人就**一句话都跟它说不上**。
@@ -13,7 +13,7 @@
  */
 
 import { openJournal } from '../base/core.mjs'
-import { buildPrompt, parseToolCall, parseToolCalls, splitReply } from '../turn/index.mjs'
+import { buildPrompt, parseToolCall, parseToolCalls, splitReply, stripToolMarks } from '../turn/index.mjs'
 import { splitUsage } from '../facts/index.mjs'
 import { usageSourceOfTool } from '../ability/index.mjs'
 
@@ -260,11 +260,14 @@ export class Chat {
       }
 
       let text = String(result?.text || '').trim()
-      if (this.tools && /\[tool:/.test(text)) {
-        // 已经到了轮数上限还在写调用行：把标记去掉。
-        // 跑过工具就把最后一次的结果拿出来说，没跑成也要说清，绝不把 "[tool:…]" 甩给用户。
-        text = text.replace(/\[tool:[^\]]+\][^\n]*/g, '').trim()
-      }
+      // 已经到了轮数上限还在写调用行：把标记去掉。
+      // 跑过工具就把最后一次的结果拿出来说，没跑成也要说清，绝不把 "[tool:…]" 甩给用户。
+      //
+      // 守卫必须留着：**没有工具表时**这一行只是模型的普通文本，不该被裁掉
+      // （用例：没有工具表时不假装执行，也不吞掉原话）。
+      // 但清理不能只看 `/\[tool:/` —— 模型偶尔写成裸形式 `[名称] {…}`，
+      // 旧判断放它过去，工具跑了、标记跟着正文一起发出去了。
+      if (this.tools) text = stripToolMarks(text)
       if (!text && last) {
         text = last.ok
           ? String(last.text || '跑完了，没有输出。').slice(0, 600)

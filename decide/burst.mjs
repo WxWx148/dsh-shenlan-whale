@@ -52,9 +52,24 @@
 
 /** 默认合并窗口（毫秒）。跟 guard.mergeWindowMs 对齐。 */
 export const DEFAULT_MERGE_WINDOW_MS = 1500
+/** 话没说完（没有句末标点）时多等一会：拆成两条发的人，第二条往往只是补前半句。 */
+export const INCOMPLETE_MERGE_WINDOW_MS = 5000
 
 /** 合并后最多留几条。再多就该分开发了 —— 合成一大坨也不是人话。 */
 export const MAX_MERGED = 6
+
+/** 这一条像不像“话还没说完”：没有句末标点，或只有图没有字。 */
+function looksIncomplete(event) {
+  const text = String(event?.payload?.text ?? event?.text ?? '').trim()
+  if (!text) return true
+  return !/[。！？!?…；;]$/.test(text)
+}
+
+/** 当前这条应该等多久；句末标点完整时仍按配置的窗口，避免所有消息都拖长。 */
+function effectiveWindow(last, windowMs) {
+  const base = Math.max(0, Number(windowMs) || 0)
+  return looksIncomplete(last) ? Math.max(base, INCOMPLETE_MERGE_WINDOW_MS) : base
+}
 
 /**
  * 该不该把这条消息并进上一条。
@@ -83,7 +98,7 @@ function shouldMerge(last, event, windowMs = DEFAULT_MERGE_WINDOW_MS) {
   const at = Number(event.at ?? 0)
   const lastAt = Number(last.at ?? 0)
   if (!at || !lastAt || at < lastAt) return false
-  return at - lastAt <= Math.max(0, Number(windowMs) || 0)
+  return at - lastAt <= effectiveWindow(last, windowMs)
 }
 
 /**
@@ -188,7 +203,7 @@ export class BurstLedger {
     if (slot.timer) this.clearTimer(slot.timer)
     slot.timer = this.setTimer(() => {
       this.#flush(key, slot, onFlush)
-    }, this.windowMs)
+    }, effectiveWindow(event, this.windowMs))
 
     return true
   }

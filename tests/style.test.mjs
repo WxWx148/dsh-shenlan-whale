@@ -42,8 +42,8 @@ await check('实测口径：模型原始输出本来就在聊天的范围里', (
 
 await check('规则：只留实测差异项（分条、标点、语气词、口癖）', () => {
   const guide = styleGuide({ channel: 'private', maxParts: 3 })
-  assert.match(guide, /一行一条/)
-  assert.match(guide, /第一条先说结论/)
+  assert.match(guide, /一条消息把意思说完整/)
+  assert.match(guide, /最多 3 条/)
   assert.match(guide, /句尾不加句号/)
   assert.match(guide, /连接词/)
   assert.match(guide, /语气词该带就带/)
@@ -69,11 +69,61 @@ await check('规则：不教模型怎么思考（删掉内部构造类指令）'
   }
 })
 
+await check('规则：禁的是空格断句，不是逗号', () => {
+  const guide = styleGuide({ channel: 'private' })
+  // 实测：143 条自身发言里 51 条（36%）通篇无逗号、拿空格当停顿，真人只有 1.4%。
+  // 「逗号少用 + 靠换行断气」写在一起时，模型就把停顿换成了空格 —— 中文里那是机器腔。
+  assert.ok(guide.includes('不要拿空格代替逗号'), '必须明确禁止空格断句')
+  assert.ok(!/逗号和书面连接词少用/.test(guide), '不能再教「逗号少用」')
+  assert.ok(!guide.includes('靠换行断气'), '「靠换行断气」与「只有换话题才另起一行」互相打架')
+})
+
+await check('规则：点名禁止 DS 原生的汇报体（清单/编号/分号并列）', () => {
+  const guide = styleGuide({ channel: 'private' })
+  // 「不按文章来」是风格描述，模型当软建议听；必须点名它实际吐出来的形状。
+  for (const word of ['不列清单', '不编号', '一是…二是…', '首先其次最后', '分号改逗号']) {
+    assert.ok(guide.includes(word), `规则块少了「${word}」`)
+  }
+  assert.ok(guide.includes('连接词'), '原有契约：规则里要说「连接词」')
+})
+
+await check('清排列：DS 原生的清单/编号/排队词不进聊天正文', () => {
+  // 提示词只能「劝」，模型常有漏网。这里是出口兜底：只清标记，不动正文。
+  assert.deepEqual(
+    splitBursts('要点：\n- 11月8日认了\n- 夜盘跌超3%', { maxParts: 4 }),
+    ['11月8日认了', '夜盘跌超3%'],
+  )
+  assert.deepEqual(
+    splitBursts('1. 先看气氛\n2. 再决定损不损', { maxParts: 4 }),
+    ['先看气氛', '再决定损不损'],
+  )
+  const list = splitBursts('问题四条：一是嘴上答应；二是记性浅；三是没重点；四是权限卡死', { maxParts: 4 }).join('')
+  assert.ok(!/一是|二是|三是|四是|；/.test(list), `排队词还在：${list}`)
+  // 删「其次，」时保留分句边界，否则「得」是黏着词，会被黏回上一句
+  assert.deepEqual(
+    splitBursts('首先，不怪你。其次，得改。最后，别再犯。', { maxParts: 4 }),
+    ['不怪你', '得改', '别再犯'],
+  )
+  // 正文里的自然用法不能误伤
+  assert.deepEqual(splitBursts('最后一次我问你，到底去不去', { maxParts: 3 }), ['最后一次我问你，到底去不去'])
+  assert.deepEqual(splitBursts('这个方案一二三都说了，你挑一个', { maxParts: 3 }), ['这个方案一二三都说了，你挑一个'])
+})
+
 await check('规则：字数与条数有预算，防止又写回一篇文章', () => {
   for (const channel of ['private', 'group']) {
-    const guide = styleGuide({ channel })
-    assert.ok(guide.length <= 260, `${channel} 规则块 ${guide.length} 字，超预算`)
-    assert.ok(guide.split('\n').length <= 8, `${channel} 规则块行数过多`)
+    for (const verbosity of ['brief', 'normal', 'chatty']) {
+      const guide = styleGuide({ channel, verbosity })
+      // 预算从 360 抬到 400：六种组合的**全部规则**实测约 380 字。
+      // 360 时截断会从尾部整行砍掉，brief/chatty 档静默少了详略规则。
+      assert.ok(guide.length <= 400, `${channel}/${verbosity} 规则块 ${guide.length} 字，超预算`)
+      assert.ok(guide.split('\n').length <= 8, `${channel}/${verbosity} 规则块行数过多`)
+      // 两档规则都必须在：渠道的和详略的，谁也不许被预算吃掉
+      assert.ok(guide.includes(channel === 'group' ? '别抢话' : '私聊可以更松'), `${channel}/${verbosity} 少了渠道规则`)
+      assert.ok(
+        guide.includes(verbosity === 'brief' ? '简短点' : verbosity === 'chatty' ? '想多说就说' : '口语优先'),
+        `${channel}/${verbosity} 少了详略规则`,
+      )
+    }
   }
 })
 
@@ -123,26 +173,34 @@ await check('分条：换行不被黏成逗号', () => {
   assert.ok(!splitBursts('A\nB', { maxParts: 3 }).join('').includes('，'))
 })
 
-await check('分条：按语义断 —— 描述不同事实的几句各发一条', () => {
-  // 用户原话：「一句话拆两三次发或者连发发两三句描述不同的事实」。
+await check('分条：逗号不是消息边界，整句保持连贯', () => {
+  // 用户要求「语感统一，不要支离破碎的断句」：
+  // 逗号只是句内停顿，不能切成两条。
   assert.deepEqual(
     splitBursts('老大给我的搜索源太差，换我我也不好意思交差', { maxParts: 3 }),
-    ['老大给我的搜索源太差', '换我我也不好意思交差'],
+    ['老大给我的搜索源太差，换我我也不好意思交差'],
   )
   assert.deepEqual(
     splitBursts('我先看看啊，等会儿给你结果', { maxParts: 3 }),
-    ['我先看看啊', '等会儿给你结果'],
+    ['我先看看啊，等会儿给你结果'],
   )
 })
 
-await check('分条：不切出碎片', () => {
-  // 用户截图里的原问题：「没有一条真新」/「的」——「的」单独发一条谁看都难受。
+await check('分条：commas 开关真的生效（不是空转）', () => {
+  // splitBursts 声明了 commas，但 splitByMeaning 以前没把它往下传给 findBreak，
+  // 于是传了也永远不在逗号处断 —— 一个空转开关比没有更坏：读代码的人以为它在生效。
+  assert.deepEqual(splitBursts('我先看看啊，等会儿给你结果，别急', { maxParts: 3, commas: true }), [
+    '我先看看啊',
+    '等会儿给你结果，别急',
+  ])
+  // 默认仍然不在逗号处断
+  assert.deepEqual(splitBursts('我先看看啊，等会儿给你结果，别急', { maxParts: 3 }), ['我先看看啊，等会儿给你结果，别急'])
+})
+
+await check('分条：逗号长句不切出碎片', () => {
   const parts = splitBursts('搜出来的全是百科和官网首页，没有一条真新的老大给我的搜索源太差，换我我也不好意思交差', { maxParts: 4 })
-  assert.ok(parts.length >= 2)
-  for (const part of parts) {
-    assert.ok(!/^[的地得了着过们]$/.test(part), `「${part}」这种碎片不该单独发`)
-    assert.ok(part.length >= 4, `「${part}」太短，像是碎片`)
-  }
+  assert.equal(parts.length, 1, '逗号不切，整段一起发')
+  assert.match(parts[0], /没有一条真新的/)
 })
 
 await check('分条：没有字数上限 —— 他想说多长说多长', () => {

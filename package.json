@@ -1,6 +1,6 @@
 {
   "name": "dsh-shenlan-whale",
-  "version": "0.46.0",
+  "version": "0.46.6",
   "description": "深蓝鲸 —— 长在本地的人格体，通道可换，记忆不丢",
   "type": "module",
   "main": "index.js",

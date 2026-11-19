@@ -213,6 +213,7 @@ await check('真实回合：主人让查代码时，能力事实与结论规则�
   const dir = mkdtempSync(path.join(tmpdir(), 'sl-turn-'))
   const runtime = new Runtime({ dir, now: () => base })
   runtime.setConfig('identity.ownerId', '10001', { confirm: true })
+  runtime.setConfig('guard.mergeWindowMs', 0, { confirm: false })
   const guard = new Guard({ config: runtime.config, now: () => base })
   const usage = new Usage({ config: runtime.config, journal: runtime.audit, now: () => base })
   const channel = { say: async () => ({ message_id: 1 }), sendImage: async () => ({}), getForward: async () => [] }

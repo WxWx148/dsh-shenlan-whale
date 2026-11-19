@@ -29,6 +29,7 @@ async function check(name, fn) {
 }
 
 const BASE = new Date(2026, 9, 30, 18, 0, 0).getTime()
+const OWNER = '200000001'
 const dirs = []
 function open() {
   const dir = mkdtempSync(path.join(tmpdir(), 'backfill-'))
@@ -96,6 +97,24 @@ await check('只补空档里的消息：已有的跳过，空档外的不要', a
 
   const audit = runtime.audit.read({ limit: 20 }).rows
   assert.ok(audit.some((row) => row.kind === 'channel_backfill'), '补了多少要留痕')
+})
+
+await check('补回的主人私聊交给 onRestored：不能只进日志不回复', async () => {
+  const { runtime } = open()
+  seed(runtime, { text: '旧私聊', messageId: 'p-old', at: BASE - 60_000, scope: 'private', from: OWNER, groupId: '' })
+  const channel = {
+    getHistory: async () => [
+      item({ messageId: 'p-new', at: BASE - 30_000, scope: 'private', from: OWNER, sender: '主人', text: '在吗', groupId: '' }),
+    ],
+  }
+  const delivered = []
+  const result = await backfillMissed({
+    runtime, channel, since: BASE - 60_000, until: BASE, now: BASE,
+    onRestored: (event) => { delivered.push(event) },
+  })
+  assert.equal(result.restored, 1)
+  assert.equal(delivered.length, 1, '主人私聊要交给上层回复')
+  assert.equal(delivered[0].payload?.text, '在吗')
 })
 
 await check('空档太短不折腾：不算掉线，也不写审计', async () => {

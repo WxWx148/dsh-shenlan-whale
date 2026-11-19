@@ -1,5 +1,5 @@
 /**
- * lib/backfill.mjs — 掉线补回：把断线期间漏掉的消息捞回来，只记事实，不回话。
+ * channel/backfill.mjs — 掉线补回：把断线期间漏掉的消息捞回来，只记事实，不回话。
  *
  * 为什么需要它：WebSocket 断开的那段时间，NapCat 不会把消息排队送来；
  * 连上之后如果不管，聊天记录里就永久缺一段 —— 而这正好是「他/她刚才说了什么」
@@ -32,7 +32,7 @@ const MAX_CONVERSATIONS = 12
  * @returns {Promise<{ok:boolean, restored?:number, skipped?:number, failed?:number, reason?:string}>}
  */
 export async function backfillMissed(input = {}) {
-  const { runtime, channel, log = () => {} } = input
+  const { runtime, channel, log = () => {}, onRestored } = input
   const now = Number(input.now) || Date.now()
   const until = Number(input.until) || now
   const since = Number(input.since) || 0
@@ -77,6 +77,12 @@ export async function backfillMissed(input = {}) {
       }
       if (!event) continue
       runtime.logEvent(event, { backfilled: true })
+      // 掉线期间漏掉的主人私聊不能只补进日志——主人会以为机器人装死。
+      // 回调在 claimMessage 之前跑，turn 才有机会认领这条并回复；
+      // 群消息仍然只补事实，不补回复。
+      if (typeof onRestored === 'function') {
+        try { await onRestored(event) } catch {}
+      }
       if (messageId) {
         seen.add(messageId)
         // 让「重复投递」的闸门也知道这条已经记过：重连后协议端可能再推一遍

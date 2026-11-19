@@ -194,10 +194,10 @@ for (const one of STRUCTURE.parents.filter((item) => item.status === 'landed')) 
   const pv = read('view/panel-view.mjs')
   const client = read('lib/client.panel.js')
   const idx = read('index.js')
-  if (!pv.includes("restart: '重启后生效'")) problems.push('R10 pane-view 少了重启项的中文标签')
+  if (!pv.includes("restart: '改后需重启'")) problems.push('R10 pane-view 少了重启项的中文标签')
   if (!pv.includes('const effect = effectOf(item, pending)')) problems.push('R10 设置项没算生效时机')
   if (!client.includes("'.slj-effect{")) problems.push('R10 前端没有渲染生效徽标的样式')
-  if (!client.includes("item.effect === 'restart'")) problems.push('R10 前端没按生效时机分轻重')
+  if (!client.includes("item.effect === 'pending'")) problems.push('R10 前端没按生效时机分轻重')
   if (idx.includes("route === '/brief'") || idx.includes("route === '/hotnews/test'")) {
     problems.push('R10 死接口 /brief 或 /hotnews/test 又回来了（没有任何调用方）')
   }
@@ -257,7 +257,7 @@ for (const one of STRUCTURE.parents.filter((item) => item.status === 'landed')) 
   const block = act.slice(act.indexOf('export const ACTION_OPS'), act.indexOf('])', act.indexOf('export const ACTION_OPS')))
   const declared = [...block.matchAll(/'([^']+)'/g)].map((one) => one[1])
   if (!idx.includes("route === '/action'")) problems.push('R13 宿主没挂 /action')
-  if (declared.length !== 21) problems.push(`R13 动作清单应是 21 项，实际 ${declared.length}`)
+  if (declared.length !== 22) problems.push(`R13 动作清单应是 22 项，实际 ${declared.length}`)
   const legacy = [
     '/memory/remember', '/memory/edit-self', '/memory/forget-self', '/memory/remember-self',
     '/memory/edit', '/memory/edit-person', '/memory/edit-group', '/memory/forget',

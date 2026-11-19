@@ -148,9 +148,11 @@ export class Dedupe {
 
   #prune(map, at) {
     const cut = at - DUP_MSG_MS
+    // 不能「遇到第一条没过期的就 break」：同一句话被再说一遍时，它的**位置**还在原处，
+    // 时间是新的 —— 于是排在最前面的那条永远「没过期」，后面的真的过期条目一辈子清不掉。
+    // 表的上限只有 400 条，整表扫一遍的代价远小于「清扫静默失效」。
     for (const [key, at2] of map) {
       if (at2 < cut) map.delete(key)
-      else break
     }
   }
 

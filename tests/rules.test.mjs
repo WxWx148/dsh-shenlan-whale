@@ -105,12 +105,11 @@ await check('规则页按分组切开，全部规则里带分组小标题', () =
     'rules.turn',
     'rules.outbound',
     'rules.tools',
-    'rules.gaps',
   ])
   const rhythm = modules.find((one) => one.detail === 'rules.rhythm')
   assert.match(rhythm.desc, /说话像不像人/)
   // 区域页按三段排：总表 / 五条链路 / 缺口。信息层级由 section 决定，前端只画标题。
-  assert.deepEqual([...new Set(modules.map((one) => one.section))], ['总表', '按链路', '缺口'])
+  assert.deepEqual([...new Set(modules.map((one) => one.section))], ['总表', '按链路'])
 
   // 设置页也按域分段：十二张卡不再是一堵平铺的墙。
   const settingSections = [...new Set(page.regions.settings.modules.map((one) => one.section))]
@@ -131,8 +130,10 @@ await check('规则页按分组切开，全部规则里带分组小标题', () =
   assert.ok(one.rows.every((row) => !row.group), '单组页面不再重复画分组标题')
 })
 
-await check('缺口单独一页：每条都有模块、下一步，且不把未接写成已支持', () => {
-  assert.ok(GAPS.length >= 3)
+await check('缺口单独一页：旧的三个已接上，不再写在“还没接上”里', () => {
+  for (const id of ['gap.switch-model', 'gap.qzone', 'gap.cross-group']) {
+    assert.ok(!GAPS.some((gap) => gap.id === id), `${id} 已经接上，不该还挂在缺口页`)
+  }
   for (const gap of GAPS) {
     assert.ok(gap.title && gap.desc && gap.next, `${gap.id} 缺字段`)
     assert.ok(existsSync(path.join(ROOT, gap.module)), `${gap.id} 指向的模块不存在：${gap.module}`)
@@ -140,7 +141,6 @@ await check('缺口单独一页：每条都有模块、下一步，且不把未�
   const detail = detailView({ runtime: { config: CONFIG }, id: 'rules.gaps' })
   assert.equal(detail.kind, 'rows')
   assert.equal(detail.rows.length, GAPS.length)
-  assert.ok(detail.rows.every((row) => row.badge === '还没接上'))
 })
 
 await check('连发合并已经接上：不再是缺口，设置里明说会真的合并', () => {

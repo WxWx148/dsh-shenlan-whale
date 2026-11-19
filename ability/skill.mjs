@@ -120,6 +120,8 @@ export const CATALOG = Object.freeze([
   { id: 'do.dev', name: '改自己的代码', what: '看源码、搜关键词、改文件、跑脚本 —— 改之前会备份，关键启动文件还要额外点头', group: 'do', needs: ['sandbox'], tools: ['code_list', 'code_read', 'code_search', 'code_write', 'code_restore', 'run_command'], risk: 'high' },
   { id: 'do.self', name: '改自己', what: '调自己的说话习惯（不动人格）', group: 'do', needs: [], tools: ['self_tune'], risk: 'medium' },
   { id: 'do.notebook', name: '写本子', what: '想写什么就写，按天存在本地', group: 'do', needs: [], tools: ['write_notebook', 'read_notebook'], risk: 'low' },
+  { id: 'do.qzone', name: '发空间说说', what: '用自己的口吻发一条 QQ 空间说说', group: 'do', needs: ['channel'], tools: ['qzone_post'], risk: 'medium' },
+  { id: 'do.leave_group', name: '退群', what: '按主人的指令退出指定群聊', group: 'do', needs: ['channel'], tools: ['leave_group'], risk: 'medium' },
 
   // ── 上网 ──────────────────────────────────────────────────────
   { id: 'net.search', name: '上网搜一下', what: '不知道的事去查，回来只说结论', group: 'net', needs: ['net'], tools: ['web_search'], risk: 'medium' },
@@ -453,7 +455,10 @@ export class SkillBook {
       return true
     })
     this.stats = { ...(raw.stats && typeof raw.stats === 'object' ? raw.stats : {}) }
-    this.failStreak = { ...(raw.failStreak && typeof raw.failStreak === 'object' ? raw.failStreak : {}) }
+    // 连续失败只在本进程内累计：重启后不要把上次的失败串带进来。
+    // 否则一个技能上次已经失败 5 次，重启后第一次再失败就直接被自动关掉，
+    // 用户看到的就是“每次重启都有技能自己关”。
+    this.failStreak = {}
     // 自增序号：**不能用 taught.length**。忘掉中间一个之后长度回退，
     // 新建的 id 就会和还活着的最后一条撞车，find() 于是读到别人的名字。
     this.seq = Number(raw.seq) || this.taught.reduce((max, row) => {
@@ -515,7 +520,9 @@ export class SkillBook {
       return { ok: false, needConfirm: true, error: `${skill.name} 能直接动手，打开前需要再确认一次` }
     }
     this.states[id] = next
-    if (next === STATE.OFF) this.failStreak[id] = 0
+    // 手动打开就是一次新的开始：不把旧失败串带进来。
+    // 否则刚点开，下一次普通失败就立刻又自动关掉，看起来像“开关没生效”。
+    this.failStreak[id] = 0
     this.#bump()
     return { ok: true, id, state: next, skill }
   }

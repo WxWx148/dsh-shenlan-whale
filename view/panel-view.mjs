@@ -1,5 +1,5 @@
 /**
- * lib/panel-view.mjs — 界面的「视图模型」：所有要显示的字，在宿主这边一次算完。
+ * view/panel-view.mjs — 界面的「视图模型」：所有要显示的字，在宿主这边一次算完。
  *
  * 为什么不让浏览器自己算：
  *   1. 界面上每个数字背后都是一条业务判断（「掉线了」和「还没连上」不是一回事，
@@ -140,10 +140,23 @@ export function withUnit(value, unit) {
  * 「还没连上」和「掉线了」必须分开：前者是刚启动还没消息，后者是连过又断了。
  * 合成一句「未连接」会让用户以为要手动做点什么，其实什么都不用做。
  */
-export function channelFace(state) {
-  if (state === 'online') return { label: '在线', tone: TONE.OK, hint: '收发正常，说话他/她能收到' }
+export function channelFace(state, info = {}) {
+  if (state === 'online') {
+    // 心跳正常 ≠ QQ 消息真的进来了。NapCat 入站卡死时心跳还会继续，
+    // 只看 connected 会把“在线但收不到”说成“收发正常”。
+    const last = Number(info.lastInboundAt) || 0
+    const now = Number(info.now) || Date.now()
+    if (last && now - last > 30 * 60_000) {
+      const mins = Math.max(1, Math.round((now - last) / 60_000))
+      return { label: '在线但没消息', tone: TONE.WARN, hint: `心跳还在，但已经 ${mins} 分钟没收到任何消息；先确认入站/重启协议端` }
+    }
+    return { label: '在线', tone: TONE.OK, hint: last ? '心跳正常；能不能收到消息看下面的最后入站时间' : '心跳正常；还没收到过消息，先确认聊天对象和登录' }
+  }
+  if (state === 'stale') return { label: '连接没响应', tone: TONE.BAD, hint: '超过 45 秒没收到心跳，消息可能发不出去；正在等它恢复' }
   if (state === 'offline') return { label: '掉线了', tone: TONE.BAD, hint: '连上过又断了，正在自己重连' }
-  if (state === 'unknown') return { label: '还没连上', tone: TONE.WARN, hint: '开关是开的，但协议端还没应答' }
+  // 「未知」不是「在线」，也不是「正在重连」：协议端没应答时消息就是发不出去。
+  // 用红色「连接未响应」而不是黄色「还没连上」，避免把掉线看成只是启动慢。
+  if (state === 'unknown') return { label: '连接未响应', tone: TONE.BAD, hint: '协议端没应答，消息现在发不出去；先看 QQ 连接/扫码' }
   return { label: '已关闭', tone: TONE.IDLE, hint: '通道关着，他/她不会收发任何消息' }
 }
 
@@ -173,8 +186,8 @@ function masteryTone(level) {
  * 那 20 多项只读状态除了这十块牌子，没有任何地方看得全。
  * 现在牌子是状态的摘要，全表在 `status.all` 详情里，两边同源。
  */
-function statusTiles({ status, config, login }) {
-  const face = channelFace(status['status.channel'])
+function statusTiles({ status, config, login, lastInboundAt = 0, now = Date.now() }) {
+  const face = channelFace(status['status.channel'], { lastInboundAt, now })
   const currency = String(get(config, 'usage.currency') || 'CNY')
   const budget = Number(status['status.budget']) || 0
   const cost = Number(status['status.todayCost'])
@@ -372,7 +385,7 @@ const HIDDEN_SETTING_KEYS = new Set(['tools.maxRounds', 'tools.maxPerRound'])
 const EFFECT_LABEL = Object.freeze({
   pending: '改了也不会有变化',
   readonly: '只读',
-  restart: '重启后生效',
+  restart: '改后需重启',
   next: '下一轮生效',
 })
 function effectOf(item, pending) {
@@ -724,15 +737,17 @@ export const CARD_PARTS = {
         section: '按链路',
       })
     }
-    modules.push({
-      detail: 'rules.gaps',
-      label: '还没接上',
-      desc: `${GAPS.length} 项已知缺口：先记下来，不装作有`,
-      icon: 'plug',
-      badge: `${GAPS.length} 项`,
-      tone: TONE.WARN,
-      section: '缺口',
-    })
+    if (GAPS.length) {
+      modules.push({
+        detail: 'rules.gaps',
+        label: '还没接上',
+        desc: `${GAPS.length} 项已知缺口：先记下来，不装作有`,
+        icon: 'plug',
+        badge: `${GAPS.length} 项`,
+        tone: TONE.WARN,
+        section: '缺口',
+      })
+    }
   },
 
   settings(modules, ctx) {
@@ -1078,7 +1093,10 @@ export function detailView(input = {}) {
 
   // ── QQ 会话列表 ──
   if (key === 'talk.qq') {
-    const face = channelFace(safeCall(() => channel?.state?.() || 'unknown', 'unknown'))
+    const face = channelFace(safeCall(() => channel?.state?.() || 'unknown', 'unknown'), {
+      lastInboundAt: Number(channel?.lastInboundAt) || 0,
+      now: at,
+    })
     const list = listConversations({ events: runtime?.events, scan: 500, limit: 100, groupName: (id) => groupNameOf(channel, id) })
     return {
       ...base,
@@ -1200,7 +1218,10 @@ export function detailView(input = {}) {
   if (key.startsWith('qq:')) {
     const conversation = key.slice(3)
     const peer = peerOf(conversation)
-    const face = channelFace(safeCall(() => channel?.state?.() || 'unknown', 'unknown'))
+    const face = channelFace(safeCall(() => channel?.state?.() || 'unknown', 'unknown'), {
+      lastInboundAt: Number(channel?.lastInboundAt) || 0,
+      now: at,
+    })
     // 群聊默认加载 100 条：40 条只够看半屏，「翻消息」第一页就到底了。
     // 仍按消息条数算（thread 内部先过滤心跳/通知），不是日志行数。
     const pageSize = Math.max(1, Math.min(200, Number(limit) || THREAD_PAGE_SIZE))
@@ -1331,8 +1352,8 @@ export function detailView(input = {}) {
         title: '还没接上',
         subtitle: '已知缺口：先记下来，不装作有',
         rows: gapRowsOf(),
-        empty: '没有登记缺口',
-        note: '这些是需求，不是开关；接上之前不要把对应能力写进「已支持」。',
+        empty: '之前登记的三个缺口都已接上，现在没有未接项',
+        note: GAPS.length ? '这些是需求，不是开关；接上之前不要把对应能力写进「已支持」。' : '换人判定、QQ 空间说说、跨群记忆都已接上。',
       }
     }
     const groupId = key === 'rules.all' ? '' : key.slice('rules.'.length)
@@ -1737,7 +1758,10 @@ export function detailView(input = {}) {
   // 以前只有「通道在线/掉线」一句，用户不知道是没启动、没登录、还是扫了没确认。
   if (key === 'connection.status') {
     const state = typeof channel === 'string' ? channel : channel && typeof channel.state === 'function' ? channel.state() : 'unknown'
-    const face = channelFace(state)
+    const face = channelFace(state, {
+      lastInboundAt: Number(channel?.lastInboundAt) || 0,
+      now: at,
+    })
     const enabled = get(config, 'channel.enabled') !== false
     const info = login
     const online = state === 'online'
@@ -1745,6 +1769,7 @@ export function detailView(input = {}) {
     const modeLabel = info?.modeLabel || { ticket: '票据', password: '密码', qr: '扫码' }[mode] || mode
     const qr = info?.qr || fallbackQr(config, at)
     const phase = info?.phase || (online ? 'online' : enabled ? 'unknown' : 'off')
+    const lastInboundAt = Number(channel?.lastInboundAt) || 0
     const methodHint =
       mode === 'ticket'
         ? '优先用协议端已登录的票据；扫过一次之后不再扫'
@@ -1775,6 +1800,15 @@ export function detailView(input = {}) {
         actions,
       },
       {
+        id: 'lastInbound',
+        title: '最后收到消息',
+        meta: lastInboundAt ? agoText(lastInboundAt, at) : '还没收到过',
+        desc: lastInboundAt
+          ? '心跳在线只说明连接还在；这个时间才是真正收到 QQ 消息的时间。长时间不动说明入站可能卡住。'
+          : '通道在线但一条消息都还没收到；先确认聊天对象是这个机器人 QQ，再重启/重新登录 NapCat。',
+        tone: online && (!lastInboundAt || at - lastInboundAt > 30 * 60_000) ? TONE.WARN : TONE.IDLE,
+      },
+      {
         id: 'method',
         title: '登录方式',
         meta: modeLabel,
@@ -1787,6 +1821,24 @@ export function detailView(input = {}) {
         meta: String(get(config, 'channel.selfId') || '未填'),
         desc: '设置 → QQ 连接里可改；票据和密码都要用到',
         open: 'settings.channel',
+      },
+      {
+        id: 'font',
+        title: '聊天字体',
+        meta: '由机器人 QQ 客户端决定',
+        desc: 'OneBot 只负责发纯文本，不改字体；要和你的号一致，请在机器人 QQ 的“设置 → 通用/聊天 → 字体”里选默认字体。',
+      },
+      {
+        id: 'qzone',
+        title: 'QQ 空间说说',
+        meta: get(config, 'qzone.enabled') === true ? '已开' : '关着',
+        desc: get(config, 'qzone.enabled') === true
+          ? '直接写一条发出去；每天上限在设置里，发送前会检查通道'
+          : '去「设置 → QQ 连接」打开“允许发空间说说”后才能发',
+        tone: get(config, 'qzone.enabled') === true ? TONE.OK : TONE.IDLE,
+        actions: get(config, 'qzone.enabled') === true && online
+          ? [{ action: 'qzone-post', actionLabel: '写一条' }]
+          : [],
       },
       {
         id: 'qr',
@@ -2175,7 +2227,13 @@ export function panelView({ runtime, chat, usage, guard, channel, typing, attent
 
   // 状态牌只算一次。以前 overview 与 usage 各算一遍、每遍又各自重算 token 与花费，
   // 同一页上同一个数字有三个来源，改一处就会有两处对不上。
-  const tiles = safe('overview', () => statusTiles({ status, config, login }), [])
+  const tiles = safe('overview', () => statusTiles({
+    status,
+    config,
+    login,
+    lastInboundAt: Number(channel?.lastInboundAt) || 0,
+    now: at,
+  }), [])
   // 限流器是进程内的实时值，不是持久状态，所以不进 status 快照 ——
   // 但仍然要能看见「这一小时说了几条」，否则调了限流没有反馈。
   const guardStats = safe('guard', () => (typeof guard?.stats === 'function' ? guard.stats(at) : null), null)
@@ -2222,7 +2280,10 @@ export function panelView({ runtime, chat, usage, guard, channel, typing, attent
   const channelState = status['status.channel'] !== undefined
     ? String(status['status.channel'])
     : safe('channel', () => channel?.state?.() || 'unknown', 'unknown')
-  const face = channelFace(channelState)
+  const face = channelFace(channelState, {
+    lastInboundAt: Number(channel?.lastInboundAt) || 0,
+    now: at,
+  })
 
   const qq = safe(
     'qq',

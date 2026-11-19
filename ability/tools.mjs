@@ -157,6 +157,8 @@ const TOOL_LABELS = Object.freeze({
   memory_search: '查记忆',
   people_lookup: '查人物',
   thread_summary: '总结群聊',
+  qzone_post: '发QQ空间说说',
+  leave_group: '退出群聊',
   send_sticker: '发表情',
   list_stickers: '表情列表',
   save_sticker: '收藏表情',
@@ -318,6 +320,9 @@ const TOOL_HINTS = Object.freeze({
   run_command: '{"bin":"node","args":["scripts/check-layers.mjs"]}',
   recall: '{"query":"上次说的那个"}',
   browser: '{"action":"open","url":"https://example.com"}',
+  image_read: '{"source":"quote"}',
+  qzone_post: '{"content":"今天想说的话"}',
+  leave_group: '{"groupId":"123456","confirm":true}',
   send_sticker: '{"mood":"无语"}',
   withdraw_message: '{"next":true}',
   at_person: '{"qq":"10001","text":"在呢"}',
@@ -350,7 +355,7 @@ const HINT_ORDER = Object.freeze([
   'code_search', 'code_read', 'code_list',
   'remind', 'revise_persona', 'group_recap',
   'who_said', 'person_dossier', 'my_memory',
-  'browser', 'recall', 'withdraw_message', 'read_forward_more', 'my_status',
+  'image_read', 'qzone_post', 'leave_group', 'browser', 'recall', 'withdraw_message', 'read_forward_more', 'my_status',
   'audit_self', 'my_patch_proposals',
 ])
 
@@ -661,9 +666,16 @@ export function createTools(input = {}) {
     return result.ok ? { ok: true, text: '改好了：' + key + ' = ' + value } : { ok: false, error: result.message || result.error }
   })
 
-  add('voice_to_text', async (args = {}) => {
+  add('voice_to_text', async (args = {}, ctx = {}) => {
+    const file = String(args.path || args.file || '')
+    // 不给路径时就是“转当前这条语音”；模型经常只发 source:recent/current，
+    // 以前这里会把空串直接喂给识别器，结果永远是“空 wave 文件”。
+    if (!file) {
+      if (typeof ctx.transcribeVoice === 'function') return ctx.transcribeVoice()
+      return { ok: false, error: '这条消息里没有语音；请给 path 或直接发语音让我转' }
+    }
     if (!runtime || typeof runtime.transcribeFile !== 'function') return { ok: false, error: '语音识别还没接上' }
-    const result = await runtime.transcribeFile(String(args.path || args.file || ''))
+    const result = await runtime.transcribeFile(file)
     return result.ok ? { ok: true, text: result.text } : { ok: false, error: result.error }
   })
 
@@ -672,15 +684,25 @@ export function createTools(input = {}) {
     const file = String(args.path || args.file || '')
     if (!file) {
       // 图片和「看看这图里的字」经常是两条消息：当前这条只有文字。
-      // 先看当前/引用，再往这个会话最近的事件里找带图的，不能直接让用户重发。
-      let pic = ctx.event?.payload?.images?.[0] || ctx.quote?.images?.[0] || null
-      if (!pic && Array.isArray(ctx.forwardAll)) {
+      // source 用来消歧：current=当前消息，quote=引用，forward=转发，recent=同会话最近一张。
+      const source = String(args.source || args.from || '').trim()
+      const currentPic = ctx.event?.payload?.images?.[0] || null
+      const quotePic = ctx.quote?.images?.[0] || null
+      let forwardPic = null
+      if (Array.isArray(ctx.forwardAll)) {
         for (const row of ctx.forwardAll) {
           const one = Array.isArray(row?.imageItems) ? row.imageItems[0] : null
-          if (one?.file || one?.url) { pic = one; break }
+          if (one?.file || one?.url) { forwardPic = one; break }
         }
       }
-      if (!pic && runtime?.events?.read) {
+      let pic = null
+      // 模型常把「引用图」误写成 source:current；当前消息没图而引用有，
+      // 用引用兜底，别让它对着一张确实存在的图回「当前消息是空的」。
+      if (source === 'current') pic = currentPic || quotePic
+      else if (source === 'quote') pic = quotePic
+      else if (source === 'forward') pic = forwardPic
+      else if (source !== 'recent') pic = currentPic || quotePic || forwardPic
+      if (!pic && source !== 'current' && source !== 'quote' && source !== 'forward' && runtime?.events?.read) {
         try {
           const rows = runtime.events.read({
             limit: 60,
@@ -689,10 +711,22 @@ export function createTools(input = {}) {
               && ((Array.isArray(row?.images) && row.images.length > 0)
                 || (Array.isArray(row?.payload?.images) && row.payload.images.length > 0)),
           })?.rows || []
+          rows.sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0))
           pic = rows[0]?.images?.[0] || rows[0]?.payload?.images?.[0] || null
         } catch {}
       }
-      if (!pic) return { ok: false, error: '要给我一张图（文件路径或聊天里的图）' }
+      if (!pic) {
+        return {
+          ok: false,
+          error: source === 'quote'
+            ? '引用的消息里没有图'
+            : source === 'current'
+              ? '当前消息里没有图'
+              : source === 'forward'
+                ? '转发记录里没有图'
+                : '要给我一张图（文件路径或聊天里的图）',
+        }
+      }
       const buffer = await imageBuffer(pic)
       if (!buffer) return { ok: false, error: '这张图取不到' }
       const temp = path.join(tmpdir(), `whale-see-${Date.now()}.${imageExt(buffer)}`)
@@ -1060,6 +1094,53 @@ export function createTools(input = {}) {
       return { ok: true, text: '发了个表情' }
     } catch (error) {
       return { ok: false, error: brief(error?.message || error, 80) }
+    }
+  })
+
+  add('leave_group', async (args = {}, ctx = {}) => {
+    const missing = needChannel()
+    if (missing) return missing
+    if (typeof channel.leaveGroup !== 'function') return { ok: false, error: '协议端没接 set_group_leave，退不了群' }
+    const owner = String(runtime?.config?.identity?.ownerId || '')
+    if (!owner || String(ctx.event?.from || '') !== owner) {
+      return { ok: false, error: '只有主人能让我退群；别人的话我不会执行' }
+    }
+    const groupId = String(args.groupId ?? args.group_id ?? args.id ?? '').replace(/\D/g, '')
+    if (!groupId) return { ok: false, error: '要退哪个群？给 groupId（纯群号）' }
+    if (args.confirm !== true) {
+      return { ok: false, error: '退群要先确认：主人明确说退哪个群后，再传 {"groupId":"...","confirm":true}' }
+    }
+    try {
+      await channel.leaveGroup(groupId)
+      return { ok: true, text: '已经退群 ' + groupId }
+    } catch (error) {
+      return { ok: false, error: '退群失败：' + brief(error?.message || error, 100) }
+    }
+  })
+
+  add('qzone_post', async (args = {}) => {
+    const missing = needChannel()
+    if (missing) return missing
+    if (runtime?.config?.qzone?.enabled !== true) {
+      return { ok: false, error: 'QQ 空间说说没开：去面板「QQ 连接」打开“允许发空间说说”' }
+    }
+    if (typeof channel.sendQzone !== 'function') return { ok: false, error: '协议端没接 send_qzone_msg，发不了说说' }
+    const content = String(args.content ?? args.text ?? '').trim().slice(0, 300)
+    if (!content) return { ok: false, error: '说说正文是空的' }
+    const limit = Math.max(0, Number(runtime.config.qzone.dailyLimit ?? 2) || 0)
+    const file = path.join(runtime.dir || '', 'qzone-state.json')
+    const day = new Date().toDateString()
+    let state = { day: '', count: 0 }
+    try { state = { ...state, ...JSON.parse(readFileSync(file, 'utf8')) } } catch {}
+    if (state.day !== day) state = { day, count: 0 }
+    if (limit <= 0) return { ok: false, error: '面板把每天说说上限设成了 0' }
+    if (state.count >= limit) return { ok: false, error: `今天已经发过 ${state.count} 条说说，到上限了` }
+    try {
+      await channel.sendQzone(content, Number(args.ugcRight ?? args.ugc_right ?? 1) || 1)
+      writeFileSync(file, JSON.stringify({ day, count: state.count + 1 }) + '\n', 'utf8')
+      return { ok: true, text: '说说发出去了：' + content.slice(0, 80) }
+    } catch (error) {
+      return { ok: false, error: '发说说失败：' + brief(error?.message || error, 100) }
     }
   })
 
@@ -1739,7 +1820,8 @@ export function createTools(input = {}) {
       '需求清单 / 给 TA 1 / 算了 1 —— 处理需求本',
       '发条说说 [正文] —— 用自己的口吻发一条 QQ 空间说说',
       '在 123456 群说一句 xxx —— 代发一句',
-      '退群 123456 —— 退群（会先确认）',
+      '退出群聊 123456 —— 退群（会先确认，私聊/群聊都行）',
+      '同意加群 01 / 拒绝加群 01 —— 处理入群邀请或加群申请',
       '答应或拒绝加群邀请 —— 还没接',
       '活动一下 / 去探险 / 读点书 / 想想事 —— 立刻做一轮',
       '提醒列表 / 取消提醒 —— 管理提醒',
@@ -1927,7 +2009,7 @@ export function createTools(input = {}) {
     // 联网动作的顺序写死：先搜索，再打开具体页面；不要让模型去 run_command curl，
     // 那条路既慢又容易超时，线上已经因此连续卡了好几轮。
     const netLine = names.includes('web_search')
-      ? '联网先 web_search；要打开具体页面用 browser 或 web_fetch，不要用 run_command curl 抓网页。'
+      ? '联网先 web_search（默认优先谷歌，失败自动换源）；要打开具体页面用 browser 或 web_fetch，不要用 run_command curl 抓网页。'
       : ''
     if (compact) return `可用工具：${names.join('、')}。例：${hints}。${netLine}只输出工具调用行。`
     return `可用工具：${names.join('、')}。参数写成 JSON 对象，例如 ${hints}。只输出工具调用行，不要解释。${netLine ? ' ' + netLine : ''}${selfLine ? ' ' + selfLine : ''}`

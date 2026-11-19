@@ -222,6 +222,21 @@ await check('连续失败到阈值就自动关掉，不硬撑', () => {
   assert.match(last.why, /连续失败 3 次/)
 })
 
+await check('手动重新打开技能会清零旧失败串，不会下一次失败又自动关', () => {
+  const book = openBook({ states: { 'net.search': STATE.OFF } })
+  book.record('net.search', false)
+  book.record('net.search', false)
+  assert.equal(book.setState('net.search', STATE.ON).ok, true)
+  assert.equal(book.failStreak['net.search'], 0, '手动打开要重新计数')
+  assert.equal(book.record('net.search', false).autoOff, false, '不能拿旧失败串立刻关')
+})
+
+await check('重启不继承旧失败串：上次失败再多，重启后第一次失败也不自动关', () => {
+  const book = openBook({ failStreak: { 'net.search': 99 } })
+  assert.equal(book.record('net.search', false).autoOff, false)
+  assert.equal(book.failStreak['net.search'], 1)
+})
+
 await check('中间成了一次，失败计数要清零（不是累计总数）', () => {
   const book = openBook({ states: { 'net.search': STATE.ON } })
   book.record('net.search', false)

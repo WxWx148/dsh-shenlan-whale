@@ -84,7 +84,7 @@ cd D:\dsh-shenlan-whale
 git init
 git add .
 git status --short     # 先看一眼：不该出现 config.json / *.jsonl / dist / _archive
-git commit -m "feat: 深蓝鲸 0.46.0 首次开源"
+git commit -m "feat: 深蓝鲸 0.46.6 首次开源"
 git branch -M main
 ```
 
@@ -143,17 +143,17 @@ git config --global alias.both "!git push origin main && git push gitee main"
 ## 8. 打版本 + 发 Release（群友从这下载）
 
 ```powershell
-git tag -a v0.46.0 -m "深蓝鲸 0.46.0"
-git push origin v0.46.0; git push gitee v0.46.0
+git tag -a v0.46.6 -m "深蓝鲸 0.46.6"
+git push origin v0.46.6; git push gitee v0.46.6
 ```
 
-zip 已经在 `dist\dsh-shenlan-whale-0.46.0.zip`。想重新打：
+zip 已经在 `dist\dsh-shenlan-whale-0.46.6.zip`。想重新打：
 
 ```powershell
-Compress-Archive -Path index.js,base,facts,truth,decide,turn,voice,mind,ability,life,view,channel,lib,cordis.patch.yml,package.json,README.md,ARCHITECTURE.md,CHANGELOG.md,LICENSE,启动NapCat.bat -DestinationPath dist\dsh-shenlan-whale-0.46.0.zip -Force
+Compress-Archive -Path index.js,base,facts,truth,decide,turn,voice,mind,ability,life,view,channel,lib,cordis.patch.yml,package.json,README.md,ARCHITECTURE.md,CHANGELOG.md,LICENSE,启动NapCat.bat -DestinationPath dist\dsh-shenlan-whale-0.46.6.zip -Force
 ```
 
-GitHub → Releases → Draft a new release → 选 `v0.46.0` → 拖入 zip → 发布。
+GitHub → Releases → Draft a new release → 选 `v0.46.6` → 拖入 zip → 发布。
 Gitee → 发行版 → 新建 → 同样附 zip。
 
 ---
@@ -189,6 +189,6 @@ Gitee：新建仓库后同样有「上传」入口，限制更宽松。
 - [ ] `github.com/<你>/dsh-shenlan-whale` 能打开，README 正常显示中文
 - [ ] `gitee.com/<你>/dsh-shenlan-whale` 内容一致
 - [ ] 两边 `package.json` 里的 `WxWx148` 都已替换（否则首页链接点进去 404）
-- [ ] Release 里有 `dsh-shenlan-whale-0.46.0.zip`
+- [ ] Release 里有 `dsh-shenlan-whale-0.46.6.zip`
 - [ ] 群文件里也放了一份 zip，公告置顶
 - [ ] 自己用无痕窗口点一遍下载链接，确认不需要登录

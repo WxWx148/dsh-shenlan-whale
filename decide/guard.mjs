@@ -67,24 +67,44 @@ export class Guard {
     // 临时静音：主人说「闭嘴半小时」时只改这里，不动配置文件。
     // 写进配置会让「安静一会儿」变成永久设置，下次重启还没消。
     this.mutedUntil = 0
+    // 分群静音：在哪个群说“闭嘴”只停哪个群，别把私聊和别的群一起停掉。
+    this.mutedBy = new Map()
     this.now = typeof input.now === 'function' ? input.now : () => Date.now()
   }
 
   /** 临时闭嘴。分钟数夹在 1 分钟到 12 小时之间 */
-  mute(minutes = 30, at = this.now()) {
+  mute(minutes = 30, at = this.now(), conversation = '') {
     const span = Math.max(1, Math.min(720, Number(minutes) || 30))
-    this.mutedUntil = at + span * 60_000
-    return { ok: true, minutes: span, until: this.mutedUntil }
+    const until = at + span * 60_000
+    const key = String(conversation || '')
+    if (key) {
+      this.mutedBy.set(key, until)
+      return { ok: true, minutes: span, until, conversation: key }
+    }
+    this.mutedUntil = until
+    return { ok: true, minutes: span, until }
   }
 
-  unmute() {
+  unmute(conversation = '') {
+    const key = String(conversation || '')
+    if (key && this.mutedBy.has(key)) {
+      const was = this.mutedBy.get(key)
+      this.mutedBy.delete(key)
+      return { ok: true, was, conversation: key }
+    }
     const was = this.mutedUntil
     this.mutedUntil = 0
     return { ok: true, was }
   }
 
-  muted(at = this.now()) {
-    return Number(this.mutedUntil) > Number(at)
+  muted(at = this.now(), conversation = '') {
+    if (Number(this.mutedUntil) > Number(at)) return true
+    const key = String(conversation || '')
+    if (!key) return false
+    const until = Number(this.mutedBy.get(key)) || 0
+    if (until > Number(at)) return true
+    if (until) this.mutedBy.delete(key)
+    return false
   }
 
   /** 配置热改之后要能跟着变 */
@@ -192,7 +212,11 @@ export class Guard {
   check(at = this.now(), context = {}) {
     const ownerId = String(this.config.identity?.ownerId || '')
     const owner = !!ownerId && String(context.event?.from || '') === ownerId
-    if (this.muted(at) && !owner) {
+    const key = this.#keyOf(context)
+    // 群级静音连主人也停：主人在群里说“闭嘴”，后续他再说话也不该让机器人
+    // 立刻破功；要恢复必须在群里说“恢复说话”。私聊的全局静音仍豁免主人。
+    const muted = this.muted(at, key)
+    if (muted && !(owner && !key.startsWith('group:'))) {
       const left = Math.max(1, Math.ceil((this.mutedUntil - at) / 60_000))
       return { ok: false, why: 'muted', text: `安静中（还有 ${left} 分钟）`, retryAfterMs: this.mutedUntil - at }
     }

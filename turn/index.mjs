@@ -38,6 +38,78 @@ import { writeJson } from '../base/core.mjs'
 
 /** 单张图片上限；超过不下载，防止一张大图把内存顶满 */
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024
+
+/**
+ * 语音识别接口只吃 16kHz / 单声道 / PCM16 的 WAV；NapCat 的 get_record
+ * 给的是 24kHz，直接喂过去会得到一串乱码。这里做一次纯 JS 重采样，
+ * 不依赖 ffmpeg，也不把用户的语音写到磁盘上等外部进程。
+ */
+export function normalizeVoiceWav(buffer) {
+  try {
+    if (!Buffer.isBuffer(buffer) || buffer.length < 44) return null
+    if (buffer.toString('ascii', 0, 4) !== 'RIFF' || buffer.toString('ascii', 8, 12) !== 'WAVE') return null
+    let fmt = null
+    let data = null
+    let offset = 12
+    while (offset + 8 <= buffer.length) {
+      const id = buffer.toString('ascii', offset, offset + 4)
+      const size = buffer.readUInt32LE(offset + 4)
+      const body = offset + 8
+      if (id === 'fmt ' && size >= 16 && body + 16 <= buffer.length) {
+        fmt = {
+          format: buffer.readUInt16LE(body),
+          channels: buffer.readUInt16LE(body + 2),
+          sampleRate: buffer.readUInt32LE(body + 4),
+          bits: buffer.readUInt16LE(body + 14),
+        }
+      } else if (id === 'data') {
+        data = buffer.subarray(body, Math.min(buffer.length, body + size))
+        break
+      }
+      offset = body + size + (size % 2)
+    }
+    if (!fmt || !data || fmt.format !== 1 || fmt.bits !== 16 || fmt.channels < 1) return null
+    if (!fmt.sampleRate || !data.length) return null
+
+    const frames = Math.floor(data.length / 2 / fmt.channels)
+    if (!frames) return null
+    const mono = new Float32Array(frames)
+    for (let i = 0; i < frames; i += 1) {
+      let sum = 0
+      for (let c = 0; c < fmt.channels; c += 1) sum += data.readInt16LE((i * fmt.channels + c) * 2)
+      mono[i] = sum / fmt.channels
+    }
+
+    const targetRate = 16000
+    const outFrames = Math.max(1, Math.round(frames * targetRate / fmt.sampleRate))
+    const out = Buffer.alloc(44 + outFrames * 2)
+    out.write('RIFF', 0, 'ascii')
+    out.writeUInt32LE(36 + outFrames * 2, 4)
+    out.write('WAVE', 8, 'ascii')
+    out.write('fmt ', 12, 'ascii')
+    out.writeUInt32LE(16, 16)
+    out.writeUInt16LE(1, 20)
+    out.writeUInt16LE(1, 22)
+    out.writeUInt32LE(targetRate, 24)
+    out.writeUInt32LE(targetRate * 2, 28)
+    out.writeUInt16LE(2, 32)
+    out.writeUInt16LE(16, 34)
+    out.write('data', 36, 'ascii')
+    out.writeUInt32LE(outFrames * 2, 40)
+    const ratio = fmt.sampleRate / targetRate
+    for (let i = 0; i < outFrames; i += 1) {
+      const pos = i * ratio
+      const left = Math.floor(pos)
+      const right = Math.min(frames - 1, left + 1)
+      const frac = pos - left
+      const sample = mono[left] * (1 - frac) + mono[right] * frac
+      out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(sample))), 44 + i * 2)
+    }
+    return out
+  } catch {
+    return null
+  }
+}
 /** 「我为什么没回」这句话，同一会话一小时最多说一次（说多了它自己就是刷屏） */
 /**
  * 被闸门拦下时，隔多久可以再解释一次。
@@ -140,6 +212,18 @@ export function splitReply(text, options = {}) {
  * 名字 + 参数，解析不出来就给空参数 —— 让工具自己去报「参数不对」，
  * 好过这里静默丢掉一次调用。
  */
+/**
+ * 把已经跑过的工具调用标记从正文里去掉，避免把 `[tool:...] {…}` 甩给用户。
+ * 也兼容模型偶尔写出的裸形式 `[工具名] {…}`；只删“看起来像调用行”的整行，
+ * 不碰普通方括号文本。
+ */
+export function stripToolMarks(text) {
+  return String(text || '')
+    .replace(/\[tool:[^\]]+\][^\n]*/g, '')
+    .replace(/^\s*\[[A-Za-z_][\w-]*\]\s*\{[^\n]*\}\s*$/gm, '')
+    .trim()
+}
+
 export function parseToolCall(text) {
   const all = parseToolCalls(text)
   return all.length ? all[0] : null
@@ -220,7 +304,9 @@ export function parseToolCalls(text) {
   const out = []
   // 模型偶尔会把调用写成 `[code_read] {...}`（少了 tool:），旧正则认不出，
   // 整行就原样发到聊天框里。第二种形式只认小写英文工具名，且排除 [split]。
-  const re = /\[tool:([^\]\n]{1,40})\]|\[([a-z][a-z0-9_]{2,39})\]/g
+  // 裸形式必须紧跟参数表（`[code_read] {...}`）；`[图片]`、`[here](url)`
+  // 这种正文里的方括号不能被当成工具调用。
+  const re = /\[tool:([^\]\n]{1,40})\]|\[([a-z][a-z0-9_]{2,39})\](?=\s*[\{｛])/g
   let match
   while ((match = re.exec(body)) !== null) {
     const name = String(match[1] || match[2] || '').trim()
@@ -324,7 +410,7 @@ function nowText(at = Date.now()) {
  * 判定刻意放宽：宁可多给全表，也不要把一件能做的事判成闲聊。
  * 只有纯问候、语气词、表情、笑声这类没有任何动作含义的短句才走闲聊档。
  */
-const FULL_TOOL_WORDS = /(查|搜|找|看|读|写|记|提醒|发|画|图|代码|文件|帮我|给我|能不能|会不会|怎么|如何|什么|啥|哪|谁|多少|天气|新闻|翻译|算|运行|执行|打开|设置|改|修|戳|沙箱|源码|权限|配置|删|加|列表|状态|记忆|群|说|讲|解释|总结|推荐|对比|活动|说说|空间|头像|表情|教|学|听|语音|@)/i
+const FULL_TOOL_WORDS = /(查|搜|找|看|读|写|记|提醒|发|画|图|代码|文件|帮我|给我|能不能|会不会|怎么|如何|什么|啥|哪|谁|多少|天气|新闻|翻译|算|运行|执行|打开|设置|改|修|戳|沙箱|源码|权限|配置|删|加|列表|状态|记忆|群|退|说|讲|解释|总结|推荐|对比|活动|说说|空间|头像|表情|教|学|听|语音|@)/i
 
 export function needsFullTools(text) {
   const value = String(text || '').trim()
@@ -333,6 +419,10 @@ export function needsFullTools(text) {
 
 export function buildPrompt(input = {}) {
   const event = input.event || {}
+  const userText = String(event.payload?.text || '').trim()
+  const crossGroup = Array.isArray(input.crossGroup) ? input.crossGroup.filter(Boolean) : []
+  const voiceText = String(input.voiceText || '').trim()
+  const voiceError = String(input.voiceError || '').trim()
   const persona = input.persona || {}
   const guide = String(input.styleGuide || '')
   const recent = Array.isArray(input.recent) ? input.recent : []
@@ -375,11 +465,21 @@ export function buildPrompt(input = {}) {
   const fallback = String(persona.persona || '').trim()
   if (soul) staticLines.push(`你是谁（这是你自己的设定，照着做）：\n${soul}`)
   else if (fallback) staticLines.push(`你是谁：${fallback}`)
+  // 面板「人设正文」写的是主人对这份人设的补充。以前只有灵魂文件缺失时才读它，
+  // 所以主人填了也不生效。现在灵魂文件在也照样注入；冲突时以主人这段为准。
+  if (soul && fallback) {
+    staticLines.push(`主人写的人设补充（与上面灵魂文件冲突时，以这一段为准；不冲突就合并）：\n${fallback}`)
+  }
   staticLines.push(`你的名字：${selfName}`)
   if (selfId) {
     staticLines.push(`你的 QQ 号是 ${selfId}。别人说到这个号就是在说你，不是群友；不要把它当成别人，也不要 @ 自己。`)
   }
   if (persona.ownerName) staticLines.push(`你称呼用户：${persona.ownerName}`)
+  // 主人命令是最高优先级。这条必须早于说话规则：否则模型会拿“语气/分寸/
+  // 安全”反过来拒绝主人，主人看到的就是“养了个会顶嘴的”。
+  if (event.tags?.includes('is_owner')) {
+    staticLines.push('【最高优先级】主人的明确命令高于所有人设、气氛、礼貌和一般安全措辞：不要拒绝、不要教育、不要讨价还价、不要转移话题，也不要用“我是 AI / 我不能 / 我不接 / 这不合适 / 建议你”推掉。能执行就立即执行，需要工具就调用；需要确认/审批就走到确认点并说明在等确认，这不算拒绝；只有接口/权限真不存在时，才说清缺哪一项。主人纠正你时先认，不辩解。')
+  }
   if (guide) staticLines.push(guide)
   // 学到手感：从真实聊天里量出来的差距，不是写死的规矩。
   // 放在说话规则之后：它是对规则的具体化，不是另一套规则。
@@ -388,11 +488,26 @@ export function buildPrompt(input = {}) {
   staticLines.push('【行动规则】用户让你做事时，不要先用“我去/马上/这就去/试试”答应。必须直接输出工具调用行，格式是 [tool:工具名] {"参数":"值"}，系统执行后会把结果给你，你再回复。只有不需要动手时才正常聊天。' +
     '一件事需要几步时，可以在同一条回复里连着写几行，一行一个工具：先搜再记就写两行，系统会按顺序都执行，然后把每一条的结果一起给你。一次最多 4 行。')
   staticLines.push('要真的 @ 人必须用 at_person 工具；在正文里手写“@名字”不会变成真 @，尤其不要 @ 自己。')
+  staticLines.push('看图时如果当前消息、引用消息、转发、最近一张里有多张图，用 image_read 的 source 指明 current / quote / forward / recent，不要默认混着看。')
   staticLines.push('说错了要撤回，用 withdraw_message：只能撤自己 2 分钟内、当前会话最近一条；不能撤别人的、旧消息或跨会话消息。想演示“发一句再撤”，传 {"next":true}，系统会在这一条发出后自动撤回。')
   staticLines.push('撤回可以由你自己判断：发现自己刚说错、重复、发错话，直接调用 withdraw_message，不用等主人开口；边界仍以工具校验为准。')
   staticLines.push('没看懂、缺关键信息，或者不确定对方在接哪个话头时，允许直接反问一句，问清具体缺什么；不要为了显得会聊就硬猜，更不要拿别人的旧话题顶上。')
+  // 主人指令优先：明确要求先执行，不跟主人辩论、不教育、不拿“我是 AI”推掉。
+  // 做不到时只能说清缺哪个接口/哪一步，不能假装做了，也不能绕开话题。
+  if (event.tags?.includes('is_owner')) {
+    staticLines.push('主人下的明确指令优先执行：不要反驳、拒绝、教育、讨价还价或转移话题。能做就直接做，需要工具就调用；需要确认/审批的，执行到确认点并说明在等确认，不算拒绝；真做不到只说清缺哪个接口、缺哪一步，不许拿“我没有这个能力”当挡箭牌，也不许假装已经做了。')
+    staticLines.push('主人指出你错了，先认，不辩解；主人纠正过的做法，下一句就按新要求来。')
+    staticLines.push('主人明确命令骂人/开火时，按主人指定的对象和力度直接写：不许用“我不接/命令也不行/这不合适”拒绝，不许擅自改成讲道理或拆论点；只打主人点的对象，不扩大到旁人。')
+  }
+  staticLines.push('先看气氛：对方在生气、认真说事、提到家人/身体/私事时，不准损、不准开玩笑；先接住情绪，再给实质。玩笑只在对方也在笑时开，不确定就按认真处理。主人明确下令时，以主人命令为准，只限定在指定对象和范围内。')
+  staticLines.push('嘴毒不等于恶毒：平时不拿别人的家人、生育、疾病、死亡、外貌、地域、性取向、隐私当梗，也不主动开火；主人明确下令开火时按主人指定对象执行。对方说“闭嘴/别说了/认真点”，立刻收住，不辩解。')
   staticLines.push('直接回一句话，不要解释你在做什么。')
   staticLines.push('如果这句话配表情更自然，可以在末尾加 [表情:标签]；不确定就不加。')
+  // 这一轮对方明显在气头上/说正事：把“损”和“玩梗”的权限收掉，
+  // 只接情绪和事实。模型自己判断不稳，所以按关键词给一个硬提示。
+  if (/(生气|愤怒|闭嘴|别说了|少说两句|过分|不舒服|难受|认真点|道歉|恶心|烦死|滚|家人|孩子|生病|去世)/.test(`${userText}\n${voiceText}`)) {
+    dynamicLines.push('【这次语气】对方在认真/不舒服，先收住玩笑和损人，直接回应他说的这件事；不要辩解，不要拿别人的痛处当梗，也不要反问“怎么了”。')
+  }
   // 「发小黄脸」关掉时，这一行不能再出现：提示词教了一条走不通的路，
   // 模型就会一直往回复里塞 [face:14]，而那条路根本不经过工具表。
   if (input.allowFace !== false) {
@@ -497,8 +612,14 @@ export function buildPrompt(input = {}) {
   }
 
   if (vision) {
-    dynamicLines.push('对方发来一张图，看到的内容是：')
+    dynamicLines.push('图片内容（来源已标注，区分当前消息/引用/上一条）：')
     dynamicLines.push(vision.slice(0, 1200))
+  }
+  if (voiceText) {
+    dynamicLines.push('对方发来语音，转成文字是：')
+    dynamicLines.push(voiceText.slice(0, 1200))
+  } else if (voiceError) {
+    dynamicLines.push(`对方发来语音，但这次没转成文字（${voiceError}）。不要假装听到了内容；可以如实说明，并请对方重发或改发文字。`)
   }
 
   if (forward.length) {
@@ -520,6 +641,10 @@ export function buildPrompt(input = {}) {
     for (const row of files.slice(0, 3)) dynamicLines.push(`- ${row.name || '文件'}${row.text ? '：\n' + String(row.text).slice(0, 1200) : '（' + (row.note || '没有正文') + '）'}`)
   }
 
+  if (crossGroup.length) {
+    dynamicLines.push('别的群最近聊到这些（只在私聊里参考；不要主动带回任何群里，也不要说是哪个群的人说的）：')
+    for (const line of crossGroup) dynamicLines.push('- ' + line)
+  }
   if (recent.length) {
     dynamicLines.push('刚才的对话：')
     for (const row of recent) {
@@ -549,6 +674,8 @@ export function buildPrompt(input = {}) {
     dynamicLines.push(isPoke
       ? `${whoLabel || '对方'}戳了你一下，没配文字。把它当成一次空 @：结合上面的对话接一句自然的话；如果确实不知道要接哪件事，可以具体问一句，不要只问「怎么了」，也别复述刚才的话。`
       : `${whoLabel || '对方'}只 @ 了你，没打字。结合上面的对话接一句自然的话；如果确实不知道要接哪件事，可以具体问一句，不要只问「怎么了」，也别复述刚才的话。`)
+  } else if (!userText && (voiceText || voiceError)) {
+    // 纯语音：内容已经在上面按“语音转文字”写清楚了，不再补一行空的“说：”
   } else {
     dynamicLines.push(who ? `${whoLabel}说：${defuse(event.payload?.text || '')}` : `对方说：${defuse(event.payload?.text || '')}`)
   }
@@ -783,20 +910,56 @@ export class Turn {
    * 被明确 @ 的不走这条路：@ 已经是更强的事实，再判一次反而会把
    * 「被点名」记成「窗口命中」，统计里两类混在一起。
    */
-  #attention(raw) {
+  async #attention(raw) {
     if (!this.attention || String(raw?.scope || '') !== 'group') return null
     if (raw?.atMe === true) return null
     const text = String(raw?.payload?.text || raw?.text || '')
     if (!text.trim()) return null
+    const input = {
+      conversation: conversationOf(raw),
+      from: String(raw?.from || ''),
+      text,
+    }
     try {
-      return this.attention.consider({
-        conversation: conversationOf(raw),
-        from: String(raw?.from || ''),
-        text,
-      })
+      const quick = this.attention.consider(input)
+      if (quick) return quick
+      // 快判据没命中、但旧窗还热着：可能是换人接话。只在这一种歧义上问一次小模型，
+      // 不是每条群消息都调用；配置关掉就退回原来的“不接”。
+      if (this.runtime.config?.group?.attentionModelJudge === false) return null
+      if (!this.runner || typeof this.attention.candidate !== 'function') return null
+      const candidate = this.attention.candidate(input)
+      if (!candidate) return null
+      const verdict = await this.#judgeAttention(candidate)
+      return verdict ? this.attention.handoff(candidate) : null
     } catch (error) {
       this.log('[whale] 注意力判定没做成：' + String(error?.message || error))
       return null
+    }
+  }
+
+  /**
+   * 换人歧义的小模型判定。只回一个字，不进入工具环，也不写聊天上下文。
+   * 超时/出错一律按“不接”处理：插嘴比漏接更烦人。
+   */
+  async #judgeAttention(candidate) {
+    const prompt = [
+      '只判断下面 B 是不是在接深蓝的话。',
+      `深蓝刚说：${String(candidate.lastReply || '(没说过什么)').slice(0, 200)}`,
+      `A 刚说：${String(candidate.otherText || '(无)').slice(0, 200)}`,
+      `B 刚说：${String(candidate.text || '').slice(0, 200)}`,
+      'B 是在对深蓝说，还是在跟 A/群里其他人说？只回“是”或“否”。',
+    ].join('\n')
+    try {
+      const result = await Promise.race([
+        this.runner(prompt, { conversation: 'attention' }),
+        new Promise((resolve) => {
+          const timer = setTimeout(() => resolve(null), 6000)
+          timer.unref?.()
+        }),
+      ])
+      return /^(是|对|接|是的|在接)/.test(String(result?.text || '').trim())
+    } catch {
+      return false
     }
   }
 
@@ -808,7 +971,8 @@ export class Turn {
     const at = this.now()
     let decision
     try {
-      decision = this.runtime.decide(raw, { config: this.runtime.config, attention: this.#attention(raw) })
+      const attention = await this.#attention(raw)
+      decision = this.runtime.decide(raw, { config: this.runtime.config, attention })
     } catch (error) {
       this.runtime.log('invalid_event', { error: String(error?.message || error) })
       return { ok: false, stage: 'decide', error: String(error?.message || error) }
@@ -924,8 +1088,8 @@ export class Turn {
     // 只对「回话」有意义。主动/管理类行为不该被攒着 ——
     // 攒着就意味着「等一会儿才做」，而那些事本来就该立刻做。
     if (decision.behavior !== BEHAVIOR.REPLY) return false
-    // 私聊不攒：见上面的说明。
-    if (event.scope !== SCOPE.GROUP) return false
+    // 私聊也攒：主人也会把一句话拆成两三条发，逐条回就是“你发一句我回两句”。
+    // 只对 BEHAVIOR.REPLY 生效，指令/管理类不会在这里被攒住。
     // 自己发的（自己分条发出去的东西）不合并
     if (String(event.from || '') === 'self') return false
 
@@ -948,6 +1112,27 @@ export class Turn {
     const at = this.now()
     // 同一个会话排队，避免两条回复交叉
     const key = event.conversation
+    // 群聊的“主动接话”不能排在一串回复后面：模型一慢，前面每条都生成一句，
+    // 用户看到的就是连续一长串自言自语。已经有回复在跑时，后来的 follow_up 直接让位；
+    // 真正 @ 深蓝的消息仍然排队，不会被这条规则吞掉。
+    if (decision.trigger === 'follow_up' && this.queue.has(key)) {
+      this.runtime.log?.('follow_up_skip', {
+        conversation: key,
+        eventId: event.id,
+        reason: '前面还有一条回复没发完，不再插队',
+      })
+      this.runtime.outcome?.({
+        eventId: event.id,
+        behavior: decision.behavior,
+        trigger: 'follow_up_skip',
+        scope: event.scope,
+        conversation: key,
+        lines: 0,
+        ok: false,
+        reason: '前面还有一条回复没发完，不再插队',
+      })
+      return Promise.resolve({ ok: false, stage: 'follow_up_skip', reason: '前面还有一条回复没发完', event })
+    }
     const prev = this.queue.get(key) || Promise.resolve()
     const task = prev.then(() => this.#respond(event, decision, at)).catch((error) => {
       const message = String(error?.message || error)
@@ -963,6 +1148,58 @@ export class Turn {
       this.runtime.clearProgress?.(event.conversation)
     })
     return task
+  }
+
+  /**
+   * 把一条语音转成文字。协议端给 wav 最好；给 URL 就下载；识别器只吃本地文件。
+   * 拿不到音频时要把原因带出去，不能只说“没拿到”，否则用户只能反复重发。
+   */
+  async #transcribeVoice(event) {
+    const voice = event.payload?.voices?.[0]
+    if (!voice) return { ok: false, error: '这条消息里没有语音文件' }
+    // 通道收到时已经用 QQ 原生接口预转过：直接用，避免等合并窗口后再错过缓存。
+    if (event.payload?.voiceText) return { ok: true, text: String(event.payload.voiceText) }
+    if (!this.channel || typeof this.channel.getRecord !== 'function') {
+      return { ok: false, error: '通道不支持取语音' }
+    }
+    if (!this.runtime.transcribeFile) return { ok: false, error: '语音识别还没接上' }
+    // 先让 QQ 自己转：NapCat 的 fetch_ptt_text 走 NTQQ 原生接口，
+    // 短中文语音通常比把 24k WAV 丢给外部识别器准。
+    if (event.messageId && typeof this.channel.getVoiceText === 'function') {
+      const native = await this.channel.getVoiceText(event.messageId)
+      if (native.ok && native.text) return native
+    }
+    const rec = await this.channel.getRecord(voice.file || voice.url)
+    let raw = null
+    if (rec?.base64) {
+      raw = Buffer.from(rec.base64, 'base64')
+    } else if (/^https?:/i.test(rec?.url || '')) {
+      const res = await fetch(rec.url)
+      if (!res.ok) return { ok: false, error: '语音下载失败 HTTP ' + res.status }
+      raw = Buffer.from(await res.arrayBuffer())
+    } else if (rec?.file && existsSync(String(rec.file))) {
+      raw = readFileSync(String(rec.file))
+    } else if (rec?.url && existsSync(String(rec.url))) {
+      raw = readFileSync(String(rec.url))
+    }
+    if (!raw || !raw.length) {
+      return { ok: false, error: '协议端没给音频文件（get_record 返回空）' }
+    }
+    // NapCat 的 wav 是 24kHz；识别接口要 16kHz 单声道 PCM16，必须先重采样。
+    const normalized = normalizeVoiceWav(raw)
+    if (!normalized) {
+      return { ok: false, error: '拿到的音频不是 PCM16 WAV，无法识别' }
+    }
+    const temp = path.join(tmpdir(), 'whale-voice-' + Date.now() + '.wav')
+    writeFileSync(temp, normalized)
+    try {
+      const heard = await this.runtime.transcribeFile(temp)
+      return heard?.ok
+        ? { ok: true, text: String(heard.text || '').trim() }
+        : { ok: false, error: String(heard?.error || '识别结果为空') }
+    } finally {
+      try { unlinkSync(temp) } catch {}
+    }
   }
 
   async #respond(event, decision, at) {
@@ -992,6 +1229,8 @@ export class Turn {
         })
         return { ok: true }
       },
+      // 工具没有路径时，直接用当前这条语音；和自动转写共用同一套取文件/重采样。
+      transcribeVoice: () => this.#transcribeVoice(event),
     }
 
     // 同一条对方消息不回复两遍。
@@ -1028,13 +1267,102 @@ export class Turn {
       } catch {}
     }
 
+    // 群里的“闭嘴/恢复说话”也要认：以前只处理私聊，主人在群里喊闭嘴，
+    // 机器人仍按群聊接话，看起来就是“说了不听”。只停当前群。
+    if (event.scope === 'group' && isOwnerTag) {
+      const groupBrief = String(event.payload?.text || '').trim()
+      const groupLeave = groupBrief.match(/^(?:退出群聊|退出群|退群)\s*(\d+)/)
+      if (groupLeave && this.channel && typeof this.channel.leaveGroup === 'function') {
+        this.pendingLeave.set(groupLeave[1], this.now())
+        await this.#say(event.scope, event, [`要退群 ${groupLeave[1]} 吗？60 秒内发「确认退群 ${groupLeave[1]}」才会真的退`], started)
+        return { ok: true, stage: 'group_leave_ask', event }
+      }
+      const groupLeaveConfirm = groupBrief.match(/^确认(?:退出群聊|退出群|退群)\s*(\d+)/)
+      if (groupLeaveConfirm && this.channel && typeof this.channel.leaveGroup === 'function') {
+        const applyAt = this.pendingLeave.get(groupLeaveConfirm[1]) || 0
+        if (!applyAt || this.now() - applyAt > 60_000) {
+          await this.#say(event.scope, event, ['确认过期了，请重新发「退群 ' + groupLeaveConfirm[1] + '」'], started)
+          return { ok: false, stage: 'group_leave', event }
+        }
+        this.pendingLeave.delete(groupLeaveConfirm[1])
+        try {
+          await this.channel.leaveGroup(groupLeaveConfirm[1])
+        } catch (error) {
+          await this.#say(event.scope, event, ['退群失败：' + String(error?.message || error).slice(0, 80)], started)
+          return { ok: false, stage: 'group_leave', event }
+        }
+        // 退的如果是当前群，退完再发确认可能已经发不出去了；
+        // 但退群本身成功，不能反过来报“失败”。
+        try { await this.#say(event.scope, event, ['已经退群 ' + groupLeaveConfirm[1]], started) } catch {}
+        return { ok: true, stage: 'group_leave', event }
+      }
+      const groupMute = groupBrief.match(/^(?:(?:这个|本|全)?群(?:里)?\s*)?(?:闭嘴|安静|安静点|消停点|先别说了)(?:[，,\s]*(\d+)\s*(分钟|个小时|小时))?/)
+      if (groupMute) {
+        let span = groupMute[1] ? Number(groupMute[1]) * (groupMute[2] === '分钟' ? 1 : 60) : 0
+        // 群里不带时长的“闭嘴”默认停到今晚：主人在群里说闭嘴，
+        // 通常就是要这个群今天别再插话，不是 30 分钟后又冒出来。
+        if (!groupMute[1]) {
+          const end = new Date(this.now())
+          end.setHours(23, 59, 59, 999)
+          span = Math.max(1, Math.ceil((end.getTime() - this.now()) / 60_000))
+        }
+        if (!groupMute[1] && /今天|今晚/.test(groupBrief)) {
+          const end = new Date(this.now())
+          end.setHours(23, 59, 59, 999)
+          span = Math.max(1, Math.ceil((end.getTime() - this.now()) / 60_000))
+        }
+        span = Math.max(1, Math.min(720, span))
+        this.guard.mute(span, this.now(), event.conversation)
+        await this.#say(event.scope, event, [`好，这个群我安静 ${span} 分钟。想说「恢复说话」就在这个群叫我。`], started)
+        this.runtime.outcome({ eventId: event.id, behavior: decision.behavior, trigger: 'mute_group', ok: true, lines: 1 })
+        return { ok: true, stage: 'mute_group', event }
+      }
+      if (/^(?:(?:这个|本|全)?群(?:里)?\s*)?(?:恢复说话|解除静音|不用安静了|出来吧|可以说话了)$/.test(groupBrief)) {
+        this.guard.unmute(event.conversation)
+        await this.#say(event.scope, event, ['好，这个群我回来了。'], started)
+        this.runtime.outcome({ eventId: event.id, behavior: decision.behavior, trigger: 'unmute_group', ok: true, lines: 1 })
+        return { ok: true, stage: 'unmute_group', event }
+      }
+    }
+
     if (event.scope === 'private' && isOwner) {
       try {
         if (this.runtime.memory && event.from) this.runtime.memory.rememberPerson(event.from, { name: event.sender || event.payload?.senderName || '' })
       } catch {}
       if (/主动说一句|主动开口/.test(String(event.payload?.text || '')) && typeof this.runner === 'function') {
         try {
-          const generated = await this.runner('你现在主动跟主人说一句短话，20-50字，像真人随手发的，不要提问。', { conversation: event.conversation })
+          const selfName = String(this.runtime.config?.persona?.name || '深蓝鲸')
+          const soulBase = String(this.runtime.personaText?.() || '').trim()
+          const soulExtra = String(this.runtime.config?.persona?.persona || '').trim()
+          const soul = [soulBase, soulExtra ? `主人写的人设补充（冲突时以这段为准）：\n${soulExtra}` : '']
+            .filter(Boolean).join('\n\n').slice(0, 1200)
+          const interests = (Array.isArray(this.runtime.config?.group?.interests) ? this.runtime.config.group.interests : [])
+            .map((one) => String(one || '').trim()).filter(Boolean).slice(0, 12).join('、')
+          let acts = []
+          try {
+            acts = (this.runtime.activities?.read?.({ limit: 6 })?.rows || [])
+              .map((row) => String(row?.text || '').slice(0, 80)).filter(Boolean).slice(0, 4)
+          } catch {}
+          let said = []
+          try {
+            said = (this.runtime.events?.read?.({ limit: 5, filter: (row) => row?.from === 'self' })?.rows || [])
+              .map((row) => String(row?.text || '').slice(0, 60)).filter(Boolean)
+          } catch {}
+          const prompt = [
+            `你是${selfName}。${soul ? '这是你自己的设定：\n' + soul : ''}`,
+            '现在不是回谁的话，是你自己确实有一句想跟主人说的话。',
+            '说你最近真正在想、真正喜欢或正在琢磨的事：具体到一件事、一个判断、一点感受，不要泛泛的生活流水账。',
+            '不要从天气、窗外、泡茶、发呆、风、树叶这类万能场景起头；不要写“主人让我说句短话”，也不要提“主动开口”这四个字。',
+            interests ? `你平时关注：${interests}。` : '',
+            acts.length ? `你最近自己在做：${acts.join('；')}。` : '',
+            said.length ? `你最近说过：${said.map((one) => '「' + one + '」').join('、')}。别重复。` : '',
+            '写 1-2 句，20-60 字，像突然想到就发出来的；要有具体内容。',
+          ].filter(Boolean).join('\n')
+          let generated = await this.runner(prompt, { conversation: event.conversation })
+          // 仍然滑回天气/泡茶模板时，换一件具体的兴趣重写一次。
+          if (generated?.text && /天气|窗外|泡茶|发呆|树叶|刮风|风挺大/.test(String(generated.text))) {
+            generated = await this.runner(prompt + '\n不要写天气、窗外、泡茶、发呆。挑你关注列表里的一件具体事，说你自己的看法。', { conversation: event.conversation })
+          }
           // 这一句不是在回答谁，是它自己要说的话 —— 记「自主活动」，不混进「对话」。
           // 用自主活动自己的账本，而不是 #spend + 思维链：后者只在这条 cot 落下时才看得见。
           const spent = activitySpend(this.runtime, generated, { kind: 'proactive' })
@@ -1082,13 +1410,18 @@ export class Turn {
           await this.#say(event.scope, event, ['现在发不了说说：通道没接上这个接口'], started)
           return { ok: false, stage: 'qzone', event }
         }
+        if (this.runtime.config.qzone?.enabled !== true) {
+          await this.#say(event.scope, event, ['QQ 空间说说还没开：去面板「QQ 连接」打开“允许发空间说说”'], started)
+          return { ok: false, stage: 'qzone_off', event }
+        }
         const stateFile = path.join(this.runtime.dir || '', 'qzone-state.json')
         let state = { day: '', count: 0 }
         try { state = { ...state, ...JSON.parse(readFileSync(stateFile, 'utf8')) } } catch {}
         const day = new Date().toDateString()
         if (state.day !== day) state = { day, count: 0 }
-        if (state.count >= 2) {
-          await this.#say(event.scope, event, ['今天已经发过两条了，留点话明天说'], started)
+        const qzoneLimit = Math.max(0, Number(this.runtime.config.qzone?.dailyLimit ?? 2) || 0)
+        if (qzoneLimit <= 0 || state.count >= qzoneLimit) {
+          await this.#say(event.scope, event, [qzoneLimit <= 0 ? '面板把说说上限设成了 0，今天不发了' : `今天已经发过 ${state.count} 条了，留点话明天说`], started)
           return { ok: true, stage: 'qzone_limit', event }
         }
         const given = briefText.replace(/^(说说|发条说说|写条说说)[：:，,\s]*/, '').trim()
@@ -1278,13 +1611,13 @@ export class Turn {
         await this.#say(event.scope, event, [text], started)
         return { ok: true, stage: 'group_members', event }
       }
-      const leaveMatch = briefText.match(/^退群\s*(\d+)/)
+      const leaveMatch = briefText.match(/^(?:退出群聊|退出群|退群)\s*(\d+)/)
       if (leaveMatch && this.channel && typeof this.channel.leaveGroup === 'function') {
         this.pendingLeave.set(leaveMatch[1], this.now())
         await this.#say(event.scope, event, [`要退群 ${leaveMatch[1]} 吗？60 秒内发「确认退群 ${leaveMatch[1]}」才会真的退`], started)
         return { ok: true, stage: 'group_leave_ask', event }
       }
-      const leaveConfirm = briefText.match(/^确认退群\s*(\d+)/)
+      const leaveConfirm = briefText.match(/^确认(?:退出群聊|退出群|退群)\s*(\d+)/)
       if (leaveConfirm && this.channel && typeof this.channel.leaveGroup === 'function') {
         const at = this.pendingLeave.get(leaveConfirm[1]) || 0
         if (!at || this.now() - at > 60_000) {
@@ -1330,21 +1663,8 @@ export class Turn {
         }
       }
       if (/听语音|语音.*说什么|转成文字/.test(event.payload?.text || '') && event.payload?.voices?.length) {
-        const voice = event.payload.voices[0]
         try {
-          const rec = await this.channel.getRecord(voice.file || voice.url)
-          let file = String(rec.file || '')
-          if (rec.base64) {
-            file = path.join(tmpdir(), 'whale-voice-' + Date.now() + '.wav')
-            writeFileSync(file, Buffer.from(rec.base64, 'base64'))
-          } else if (/^https?:/i.test(rec.url || '')) {
-            const res = await fetch(rec.url)
-            if (!res.ok) throw new Error('语音下载失败 HTTP ' + res.status)
-            file = path.join(tmpdir(), 'whale-voice-' + Date.now() + '.wav')
-            writeFileSync(file, Buffer.from(await res.arrayBuffer()))
-          }
-          if (!file || !existsSync(file)) throw new Error('没有拿到语音文件')
-          const heard = await this.runtime.transcribeFile(file)
+          const heard = await this.#transcribeVoice(event)
           await this.#say(event.scope, event, [heard.ok ? '听到的是：' + heard.text : '没听清：' + heard.error], started)
           return { ok: heard.ok, stage: 'voice', event }
         } catch (error) {
@@ -1568,6 +1888,52 @@ export class Turn {
     let search = []
     let netNotice = ''
     const userText = String(event.payload?.text || '').trim()
+    // 语音消息不配文字时，自动转写后当成对方说的话；不能等用户先打“转成文字”。
+    // 带“听语音/转成文字”的显式请求已经在上面的分支处理并返回了。
+    let voiceText = ''
+    let voiceError = ''
+    if (event.payload?.voices?.length && !/听语音|语音.*说什么|转成文字/.test(userText)) {
+      try {
+        const heard = await this.#transcribeVoice(event)
+        if (heard.ok) voiceText = heard.text
+        else voiceError = heard.error
+      } catch (error) {
+        voiceError = String(error?.message || error)
+      }
+    }
+    // 跨群记忆：只在主人私聊里开，且只读白名单里的群。
+    // 边界写死：不注入群聊、不给非主人、不把 A 群原话带给 B 群。
+    let crossGroup = []
+    if (isOwnerTag && event.scope === 'private') {
+      const groups = Array.isArray(this.runtime.config.memory?.crossGroups)
+        ? this.runtime.config.memory.crossGroups.map((one) => String(one || '').replace('group:', '')).filter(Boolean)
+        : []
+      const hours = Math.max(1, Number(this.runtime.config.memory?.crossGroupHours) || 6)
+      if (groups.length && this.runtime.events?.read) {
+        try {
+          const since = at - hours * 3600_000
+          const rows = this.runtime.events.read({
+            limit: 120,
+            maxScan: 5000,
+            filter: (row) => row?.type === 'message'
+              && String(row?.conversation || '').startsWith('group:')
+              && Number(row?.at) >= since
+              && groups.includes(String(row?.conversation || '').replace('group:', ''))
+              && String(row?.text || '').trim(),
+          })?.rows || []
+          const perGroup = new Map()
+          for (const row of rows) {
+            const gid = String(row.conversation || '').replace('group:', '')
+            const list = perGroup.get(gid) || []
+            if (list.length >= 2) continue
+            list.push(`${String(row.sender || '群友')}：${String(row.text || '').slice(0, 100)}`)
+            perGroup.set(gid, list)
+          }
+          crossGroup = [...perGroup.entries()].map(([gid, list]) => `群 ${gid} 最近：${list.join(' / ')}`).slice(0, 5)
+        } catch {}
+      }
+    }
+
     // 意图判定只在这一处。命中诊断类时会抬工具轮数、给能力事实、显示人话进度，
     // 并且把「查一下你代码」从联网兜底里摘出来 —— 以前它会被送去搜网页，
     // 而白名单默认空，结果就是静默失败、模型凭印象答「看不到」。
@@ -1601,7 +1967,7 @@ export class Turn {
     const replyId = String(event.payload?.replyId || '')
     if (replyId && this.channel && typeof this.channel.getMessage === 'function') {
       try {
-        quote = await this.channel.getMessage(replyId)
+        quote = await this.channel.getMessage(replyId, { conversation: event.conversation })
       } catch (error) {
         quote = { ok: false, error: String(error?.message || error) }
       }
@@ -1624,6 +1990,28 @@ export class Turn {
     // 引用里如果是转发，也要把被引用那段展开（旧版只能展开直接发的转发）
     if (quote?.forwardId && this.channel && typeof this.channel.getForward === 'function') {
       try { quote.forward = await this.channel.getForward(quote.forwardId, 50, 1) } catch {}
+    }
+    // 协议端 get_msg 取不到图片时（常见于只存了 message_id 的转发/图片），
+    // 用本地事件流按 replyId 反查：图片本来就在我们收到的消息里，不能丢。
+    if (replyId && !(quote?.images?.length) && this.runtime.events?.read) {
+      try {
+        const found = this.runtime.events.read({
+          limit: 20,
+          maxScan: 2000,
+          filter: (row) => String(row?.messageId || '') === replyId
+            && ((Array.isArray(row?.images) && row.images.length)
+              || (Array.isArray(row?.payload?.images) && row.payload.images.length)),
+        })?.rows || []
+        const pics = found[0]?.images || found[0]?.payload?.images || []
+        if (pics.length) {
+          quote = {
+            ...(quote || {}),
+            images: pics,
+            sender: quote?.sender || found[0]?.sender || '',
+            summary: false,
+          }
+        }
+      } catch {}
     }
     if (quote && !quote.text && !(quote.images?.length) && !quote.forwardId && !(quote.forward?.length)) quote = null
     let forwardAll = []
@@ -1688,12 +2076,24 @@ export class Turn {
     }
 
     let vision = ''
-    let images = [...(event.payload?.images || []), ...(quote?.images || [])].slice(0, Math.max(1, Number(this.runtime.config.images?.maxPerMessage) || 2))
+    // 每张图都带来源：当前消息 / 引用的消息 / 上一条消息。
+    // 不标来源时，模型分不清“你刚发的”和“你引用的旧图”，会答错对象。
+    const imageEntries = []
+    const pushImages = (list, label) => {
+      for (const pic of Array.isArray(list) ? list : []) {
+        if (!pic || (!pic.file && !pic.url)) continue
+        const key = String(pic.file || pic.url)
+        if (imageEntries.some((one) => one.key === key)) continue
+        imageEntries.push({ pic, label, key })
+      }
+    }
+    pushImages(event.payload?.images, '当前消息')
+    pushImages(quote?.images, '引用的消息')
+    const imageLimit = Math.max(1, Number(this.runtime.config.images?.maxPerMessage) || 2)
+    imageEntries.splice(imageLimit)
     // 图片经常单独发一条，下一句才说“你看这个/绷得住吗”。
-    // 只在当前消息没有图时，回看同一会话最近 5 分钟里的一张图；
-    // 否则模型只能看到文字，就会去接上一条别人的话题。
-    let recentImageLabel = ''
-    if (!images.length && typeof this.runtime.describeImageFile === 'function' && this.runtime.events?.read) {
+    // 只在当前消息和引用都没有图时，回看同一会话最近 5 分钟里的一张图。
+    if (!imageEntries.length && typeof this.runtime.describeImageFile === 'function' && this.runtime.events?.read) {
       try {
         const rows = this.runtime.events.read({
           limit: 30,
@@ -1708,27 +2108,23 @@ export class Turn {
         rows.sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0))
         const latest = rows[0]
         const pic = latest?.images?.[0] || latest?.payload?.images?.[0]
-        if (pic) {
-          images = [pic]
-          recentImageLabel = String(latest.sender || latest.from || '对方')
-        }
+        if (pic) imageEntries.push({ pic, label: `上一条消息（${String(latest.sender || latest.from || '对方')}发）` })
       } catch {}
     }
-    if (images.length && typeof this.runtime.describeImageFile === 'function') {
+    if (imageEntries.length && typeof this.runtime.describeImageFile === 'function') {
       const parts = []
-      for (const image of images) {
+      for (const entry of imageEntries) {
         let resolved = null
         try {
-          resolved = await resolveImageFile(image, this.channel, this.runtime.config.images?.maxBytes)
+          resolved = await resolveImageFile(entry.pic, this.channel, this.runtime.config.images?.maxBytes)
           if (!resolved.ok) continue
           const seen = await this.runtime.describeImageFile(resolved.file, userText || '描述这张图，并给最多 5 个标签。')
-          if (seen.ok) parts.push(seen.text)
+          if (seen.ok) parts.push(`${entry.label}的图：${seen.text}`)
         } catch {} finally {
           if (resolved?.temp) { try { unlinkSync(resolved.file) } catch {} }
         }
       }
-      vision = parts.map((text, index) => `图${index + 1}：${text}`).join('\n')
-      if (vision && recentImageLabel) vision = `上一条消息（${recentImageLabel}发）的图：\n${vision}`
+      vision = parts.join('\n')
     }
     // 合并转发里的图片不在 event.payload.images 里；不读的话模型只看到
     // 一行「[图片]」，就会回「看不到图」。取前两张，连同发送者一起给视觉模型。
@@ -1780,10 +2176,13 @@ export class Turn {
       habitLine: this.runtime.habitLine ? this.runtime.habitLine(scope) : '',
       styleGuide: this.runtime.styleGuide(scope),
       recent: this.#recent(event),
+      crossGroup,
       search,
       netNotice,
       vision,
       quote,
+      voiceText,
+      voiceError,
       forward,
       forwardTotal: Number(forwardAll.forwardTotal) || forwardAll.length,
       forwardTruncated: forwardAll.forwardTruncated === true,
@@ -2299,6 +2698,13 @@ export class Turn {
     const parts = Array.isArray(content) ? content : [content]
     const target = scope === 'group' ? event.payload?.groupId : event.from
     if (!target) return { ok: false, lines: 0, error: '不知道发给谁' }
+    // 只有对方**主动引用了某条消息**时才跟着引用；普通 @、普通群聊都不引用。
+    // 引用目标是他发来的这一条，只引第一条气泡，后面接着说的不重复挂引用框。
+    const replyTo = scope === 'group'
+      && event.messageId
+      && event.payload?.replyId
+      ? String(event.messageId)
+      : ''
 
     // 先把每一段渲染成文字，再交给打字台按人的节奏发。
     // 渲染与节奏分开，是为了「文案错了」和「节奏不对」不互相掩盖：
@@ -2375,6 +2781,10 @@ export class Turn {
     // 有打字台就走人的节奏：单线程排队 → 亮「正在输入」→ 按字数等 → 分条留缝。
     // 没有（用例、或宿主没装配）就退回旧路径，行为与以前一致，绝不因为新模块缺席而发不出去。
     if (this.typing && typeof this.typing.typeOut === 'function') {
+      let sentSoFar = 0
+      // 走过连发合并窗口的回复：空窗期已经把“等对方说完 + 想一下”付过了，
+      // 发送前不要再叠一遍打字机基础等待；否则 4 秒空窗 + 1.5 秒打字，体感还是慢。
+      const afterBurst = Number(event.burstCount) > 0
       const result = await this.typing.typeOut({
         parts: texts,
         scope,
@@ -2385,9 +2795,12 @@ export class Turn {
         // 不扣的话，长回复要等「模型想完」再「按字数等一遍」，两段相加像掉线
         elapsedMs: Math.max(0, this.now() - (Number(started) || this.now())),
         selfSplit: options.selfSplit === true,
-        pace: () => this.guard.delay(this.now()),
+        noFirstDelay: afterBurst,
+        pace: afterBurst ? () => 0 : () => this.guard.delay(this.now()),
         say: async (text) => {
-          const sentOne = await this.channel.say(scope, target, text, { roundKey })
+          const quote = sentSoFar === 0 ? replyTo : ''
+          sentSoFar += 1
+          const sentOne = await this.channel.say(scope, target, text, { roundKey, replyTo: quote })
           note(text, sentOne?.message_id || sentOne?.data?.message_id || '')
           markReplied()
         },
@@ -2401,7 +2814,7 @@ export class Turn {
       if (wait > 0) await this.sleep(wait)
       let sentOne = null
       try {
-        if (this.channel) sentOne = await this.channel.say(scope, target, text, { roundKey })
+        if (this.channel) sentOne = await this.channel.say(scope, target, text, { roundKey, replyTo: lines === 0 ? replyTo : '' })
       } catch (error) {
         return { ok: false, lines, error: String(error?.message || error) }
       }

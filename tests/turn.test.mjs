@@ -13,7 +13,7 @@ import path from 'node:path'
 import { Runtime } from '../app/index.mjs'
 import { Guard } from '../decide/index.mjs'
 import { Usage } from '../facts/index.mjs'
-import { Turn, buildPrompt, parseToolCalls, splitReply } from '../turn/index.mjs'
+import { Turn, buildPrompt, parseToolCalls, splitReply, stripToolMarks } from '../turn/index.mjs'
 import { AttentionDesk } from '../decide/index.mjs'
 import { TypingDesk } from '../voice/index.mjs'
 import { KIND, SCOPE, SOURCE } from '../facts/index.mjs'
@@ -40,6 +40,8 @@ function open() {
   dirs.push(dir)
   const runtime = new Runtime({ dir, now: () => BASE })
   runtime.setConfig('identity.ownerId', OWNER, { confirm: true })
+  // 这一套验的是单条回合的发送/记账；连发合并由 burst.test.mjs 单独验。
+  runtime.setConfig('guard.mergeWindowMs', 0, { confirm: false })
   const guard = new Guard({ config: runtime.config, now: () => BASE })
   const usage = new Usage({ config: runtime.config, journal: runtime.audit, now: () => BASE })
   const sent = []
@@ -135,13 +137,10 @@ await check('没有字数上限：想多长说多长，不切碎', () => {
   // 「没有一条真新」+「的」—— 碎片单独发出去，在聊天里是最难看的一种。
   const text = '嗯，知道了，昨天那事我看了下，主要是配置那层的问题，改了就好了'
   const parts = splitReply(text, { maxParts: 3 })
-  assert.ok(parts.length >= 2, `不同的几件事该分开说，实际 ${parts.length} 条`)
-  for (const part of parts) {
-    assert.ok(!/^[的地得了着过们]$/.test(part), `「${part}」是碎片，不该单独发`)
-  }
+  assert.equal(parts.length, 1, '逗号是句内停顿，不该切成碎片')
   // 内容一条都不能丢
   const strip = (s) => s.replace(/[，,。！？!?、；;：:…]/g, '')
-  assert.equal(strip(parts.join('')), strip(text), '切完内容要一样')
+  assert.equal(strip(parts.join('')), strip(text), '整句内容要一样')
 })
 
 await check('整段没有标点就原样发，不硬切', () => {
@@ -174,12 +173,11 @@ await check('分条连发不合并：描述不同事实的几句要各发一条'
   assert.match(parts[2], /保存/)
 })
 
-await check('一句拆成几条也照发：拆条本身不是复读', () => {
-  // 「一句话拆两三次发」是拟人的节奏，不是要拦的东西
+await check('一句带逗号也整句发，语感不碎', () => {
   const parts = splitReply('我先看看啊，等会儿给你结果', { maxParts: 3 })
-  assert.ok(parts.length >= 2, `该拆成几条，实际 ${parts.length}`)
+  assert.equal(parts.length, 1, '逗号不是消息边界')
   const strip = (s) => s.replace(/[，,。！？!?、；;：:…]/g, '')
-  assert.equal(strip(parts.join('')), strip('我先看看啊，等会儿给你结果'), '拆完内容不能丢')
+  assert.equal(strip(parts.join('')), strip('我先看看啊，等会儿给你结果'), '内容不能丢')
 })
 
 // ── 上下文 ───────────────────────────────────────────────────
@@ -234,6 +232,78 @@ await check('学到的手感进提示词：那一行要跟着场景走', () => {
   assert.match(priv, /【学到的手感·私聊】/)
 })
 
+await check('私聊/群聊退群：退出群聊 ID 先确认，确认后才调用 leaveGroup', async () => {
+  const ctx = open()
+  const left = []
+  ctx.channel.leaveGroup = async (id) => { left.push(String(id)) }
+  const turn = makeTurn(ctx)
+  const asked = await turn.handle(raw({ from: OWNER, text: '退出群聊 300000002' }))
+  await new Promise((r) => setTimeout(r, 20))
+  assert.equal(asked.stage, 'group_leave_ask')
+  assert.equal(left.length, 0, '确认前不能真退')
+  await turn.handle(raw({ from: OWNER, text: '确认退群 300000002' }))
+  await new Promise((r) => setTimeout(r, 20))
+  assert.deepEqual(left, ['300000002'])
+})
+
+await check('主人指令优先：不能反驳拒绝或拿“没能力”推掉', () => {
+  const prompt = buildPrompt({
+    event: { payload: { text: '把群退了', senderName: '主人' }, from: OWNER, scope: 'private', tags: ['is_owner'] },
+    persona: { name: '深蓝' },
+  })
+  assert.match(prompt, /【最高优先级】主人的明确命令/)
+  assert.match(prompt, /不要拒绝、反驳、教育/)
+  assert.match(prompt, /我没有这个能力/)
+  assert.match(prompt, /先认，不辩解/)
+  assert.match(prompt, /我不接 \/ 命令也不行 \/ 我没有这个能力 \/ 这不合适/)
+  // 主人授权只说一次：这几条关键语义在整份提示词里各出现恰好一次，
+  // 防止以后又有人在别处补一块 is_owner 堆成第二遍。
+  for (const re of [/【最高优先级】主人的明确命令/g, /我没有这个能力/g, /命令也不行/g]) {
+    assert.equal((prompt.match(re) || []).length, 1, `主人授权重复了：${re}`)
+  }
+})
+
+await check('主人指令没有现成工具时要变通，不许就地回“做不到”', () => {
+  const prompt = buildPrompt({
+    event: { payload: { text: '帮我把那个文件处理一下', senderName: '主人' }, from: OWNER, scope: 'private', tags: ['is_owner'] },
+    persona: { name: '深蓝' },
+  })
+  for (const want of ['没有现成工具', '不许就地回“做不到”', '换个工具', '组合几步', '替代路径', '指代或模糊', '自己先绕', '绕不通才说清']) {
+    assert.ok(prompt.includes(want), `缺了变通要求「${want}」——主人下指令不能一句做不到顶回去`)
+  }
+  // 边界仍在：确认不算拒绝、客观缺口仍要说实话，不能为了“不拒绝”就假装做了。
+  assert.match(prompt, /说明在等确认，这不算拒绝/)
+  assert.match(prompt, /不许假装已经做了/)
+  // 非主人不注入这套授权。
+  const other = buildPrompt({
+    event: { payload: { text: '帮我把那个文件处理一下' }, from: '99999', scope: 'private', tags: [] },
+    persona: { name: '深蓝' },
+  })
+  assert.ok(!other.includes('没有现成工具'))
+})
+
+await check('气氛规则：对方生气/认真时，提示词明确收掉嘴毒和玩笑', () => {
+  const prompt = buildPrompt({
+    event: { payload: { text: '你别拿我家人生病开玩笑，认真点', senderName: '老王' }, from: '20002', scope: 'private' },
+    persona: { name: '深蓝' },
+  })
+  assert.match(prompt, /先看气氛/)
+  assert.match(prompt, /不拿别人的家人、生育、疾病/)
+  assert.match(prompt, /【这次语气】/)
+  assert.match(prompt, /不要辩解/)
+})
+
+await check('跨群记忆只以“别的群”进提示词，并明确不能带回群里', () => {
+  const prompt = buildPrompt({
+    event: { payload: { text: '他们最近聊啥', senderName: '老王' }, from: '20002', scope: 'private' },
+    persona: { name: '深蓝' },
+    crossGroup: ['群 123 最近：老王：显卡又涨了 / 小李：再等等'],
+  })
+  assert.match(prompt, /别的群最近聊到/)
+  assert.match(prompt, /显卡又涨了/)
+  assert.match(prompt, /不要主动带回任何群里/)
+})
+
 await check('没有手感就不塞那一行：空字符串不能变成占位', () => {
   const prompt = buildPrompt({
     event: { payload: { text: '在吗', senderName: '老王' }, from: '20002' },
@@ -256,8 +326,20 @@ await check('私聊进来 → 回一句 → 通道真的收到了', async () => 
   assert.equal(ctx.sent[0].text, '嗯，知道了')
 })
 
-await check('群里没被 @：不回（这是设计，不是失灵）', async () => {
+await check('[split] 超过两段：只发两条，但一段内容都不能丢', async () => {
   const ctx = open()
+  const turn = makeTurn(ctx, { runner: async () => ({ text: '一\n[split]\n二\n[split]\n三', usage: null }) })
+  await turn.handle(raw())
+  await new Promise((r) => setTimeout(r, 30))
+  // 上限仍是两段（口子放开等于允许刷屏），但第三段必须并进第二条 ——
+  // 旧写法 slice(0, 2) 会把它整个吞掉，用户看到的是话说一半就断了。
+  // 注意：段内还有换行时，splitBursts 仍可继续拆，所以条数上限看 maxParts（默认 3）。
+  assert.ok(ctx.sent.length <= 3, `条数不能超出 maxParts，实际 ${ctx.sent.length}`)
+  const all = ctx.sent.map((one) => one.text).join('')
+  for (const piece of ['一', '二', '三']) assert.ok(all.includes(piece), `「${piece}」被吞了：${all}`)
+})
+
+await check('群里没被 @：不回（这是设计，不是失灵）', async () => {  const ctx = open()
   const turn = makeTurn(ctx)
   const result = await turn.handle(raw({ scope: SCOPE.GROUP, text: '今天好热', payload: { groupId: '555' } }))
   await new Promise((r) => setTimeout(r, 30))
@@ -738,6 +820,7 @@ await check('打字台接上：发之前先亮「正在输入」，然后才出�
   }
   const typing = new TypingDesk({ channel, sleep: async () => {}, random: () => 0, log: () => {} })
   const turn = makeTurn({ ...ctx, channel }, { channel, typing })
+  ctx.runtime.setConfig('guard.mergeWindowMs', 0, { confirm: false })
   await turn.handle(raw())
   assert.equal(events[0], 'typing', '指示器必须排在第一条消息之前')
   assert.ok(events.some((one) => one.startsWith('say:')), '消息还是要发出去')
@@ -761,6 +844,7 @@ await check('先亮再发：early 一定在 typeOut 之前，且一条只亮一�
     early: async () => { order.push('early') },
     typeOut: async (input) => { order.push('typeOut'); await input.say('嗯'); return { ok: true, lines: 1 } },
   }
+  ctx.runtime.setConfig('guard.mergeWindowMs', 0, { confirm: false })
   await turn.handle(raw())
   assert.deepEqual(order, ['early', 'typeOut'], '先亮再发，且只亮一次')
 })
@@ -788,6 +872,22 @@ await check('容错解析：合法 JSON 走原路，一个字符都不动', () =
   const [call] = parseToolCalls('[tool:remember_fact] {"text":"it\'s fine，真的"}')
   assert.equal(call.invalid, false)
   assert.equal(call.args.text, "it's fine，真的", '合法输入不该被「翻译」碰到')
+})
+
+// ── 工具标记：正文里一个都不能留 ──────────────────────────────
+await check('工具标记：裸形式（少了 tool:）也认，且必须从正文里清掉', () => {
+  const [call] = parseToolCalls('[code_read] {"path":"a.mjs"}')
+  assert.equal(call.name, 'code_read', '裸形式仍要能执行')
+  assert.equal(stripToolMarks('[code_read] {"path":"a.mjs"}'), '', '裸形式标记不能发出去')
+  assert.equal(stripToolMarks('[tool:calc] {"expr":"1+1"}'), '', '带前缀的照旧要清')
+})
+
+await check('工具标记：正文里的中括号不是工具调用', () => {
+  // 只认「后面跟着参数表」的裸形式，否则 [图片]、[here](url) 会被误当成工具
+  assert.equal(parseToolCalls('看图 [image] 这个方案怎么样').length, 0)
+  assert.equal(parseToolCalls('参考 [here](https://example.com) 的说法').length, 0)
+  assert.equal(stripToolMarks('看图 [image] 这个方案怎么样'), '看图 [image] 这个方案怎么样')
+  assert.equal(stripToolMarks('参考 [here](https://example.com) 的说法'), '参考 [here](https://example.com) 的说法')
 })
 
 // ── 工具环收口：不能「一直在调工具、一句话都没说」 ────────────

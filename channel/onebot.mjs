@@ -21,6 +21,8 @@ import { Dedupe } from '../decide/index.mjs'
 
 /** 90 秒一个帧都没有，就当这条连接死了（NapCat 心跳 30 秒一次，留三倍余量） */
 const STALE_MS = 90_000
+/** 心跳 30 秒一次；超过 45 秒没帧就先把面板标成“没响应”，不等到 90 秒才承认。 */
+const SOFT_STALE_MS = 45_000
 /** 连上满 30 秒才算「稳了」；只有稳过的断开才允许把退避清零 */
 const STABLE_MS = 30_000
 
@@ -366,6 +368,7 @@ export class OneBotChannel {
     // 网线掉了、Wi-Fi 换了、NapCat 假死，socket 都还「开着」，房间静悄悄但谁都不知道。
     this.openedAt = 0 // 这次连接是什么时候开的（用来判断「稳了没有」）
     this.lastFrameAt = 0 // 最近一次收到任何帧（心跳也算）
+    this.lastInboundAt = 0 // 最近一次收到真正的消息（不含心跳）；面板用它说明“在线”不等于“收得到”
     this.livenessTimer = null
     this.closedCode = 0 // 上一次 close 的码，排查时唯一能看的线索
     // 群号 → 群名。OneBot 的群消息事件里没有群名，只能靠 get_group_list 问一次；
@@ -385,7 +388,12 @@ export class OneBotChannel {
     // 主动停掉的要报 off，不能报 unknown —— unknown 的意思是「开着但还没消息」，
     // 用户看到它会把「我关了」误当成「还没连上」，然后再去点一次。
     if (this.stopped) return 'off'
-    if (this.connected) return 'online'
+    if (this.connected) {
+      // socket 还开着不等于通道能用：NapCat 假死时 socket 不会 close，
+      // 只是心跳停了。超过 45 秒没帧就报 stale，面板不能继续写“在线”。
+      const silent = this.now() - (this.lastFrameAt || this.openedAt || this.now())
+      return silent > SOFT_STALE_MS ? 'stale' : 'online'
+    }
     return this.retries > 0 ? 'offline' : 'unknown'
   }
 
@@ -708,6 +716,14 @@ export class OneBotChannel {
 
     const raw = toRaw(payload, { selfId: String(this.config.channel?.selfId || '') || this.selfId || '' })
     if (!raw) return
+    if (raw.kind === 'message' || raw.kind === 'image') this.lastInboundAt = this.now()
+    // 语音一进来就让 QQ 原生接口先转：PTT 在 NTQQ 缓存里越新越稳。
+    // 这一步不等结果，turn 的合并窗口结束前通常已经回来了。
+    if (raw.payload?.voices?.length && raw.messageId) {
+      void this.getVoiceText(raw.messageId).then((heard) => {
+        if (heard.ok && heard.text) raw.payload.voiceText = heard.text
+      }).catch(() => {})
+    }
     try {
       this.onRaw?.(raw)
     } catch (error) {
@@ -882,15 +898,52 @@ export class OneBotChannel {
     }
   }
 
+  /**
+   * get_msg 取不到时，从该会话最近历史里按 message_id 找。
+   * NapCat 对很旧的图片/转发经常让 get_msg 超时，但群历史里还在；
+   * 没有这层兜底，引用里的图就会被当成“文字本身”，模型只能回“图没跟过来”。
+   */
+  async #messageFromHistory(id, conversation) {
+    const conv = String(conversation || '')
+    if (!conv) return null
+    try {
+      // 先按目标 message_seq 精确翻到那条附近（旧图也能拿到）；
+      // 协议端不认 seq 时，再退回最近 100 条。
+      const pages = [
+        await this.getHistory(conv, { count: 5, messageSeq: id }),
+        await this.getHistory(conv, { count: 100 }),
+      ]
+      for (const items of pages) {
+        const hit = (Array.isArray(items) ? items : []).find((item) => String(item?.messageId || '') === String(id))
+        if (!hit) continue
+        return {
+          ok: true,
+          text: String(hit.text || ''),
+          sender: String(hit.sender || ''),
+          images: Array.isArray(hit.images) ? hit.images : [],
+          forwardId: String(hit.forwardId || ''),
+          source: 'history',
+        }
+      }
+      return null
+    } catch {
+      return null
+    }
+  }
+
   /** 取一条被引用的消息正文；失败返回 ok:false，不让引用拖垮整轮 */
-  async getMessage(id) {
+  async getMessage(id, options = {}) {
     try {
       // 各协议端对 message_id 的类型要求不同：先按字符串，再按数字，别一次失败就放弃
       let data
       try {
-        data = await this.sendRaw('get_msg', { message_id: String(id) }, 8000)
+        data = await this.sendRaw('get_msg', { message_id: String(id) }, 4000)
       } catch {
-        data = await this.sendRaw('get_msg', { message_id: Number(id) || id }, 8000)
+        // 旧图片/转发经常让 get_msg 一直不回；先从本会话历史里捞，
+        // 别在这里干等两遍 8 秒，把引用回复拖成“掉线”。
+        const fromHistory = await this.#messageFromHistory(id, options.conversation)
+        if (fromHistory) return fromHistory
+        data = await this.sendRaw('get_msg', { message_id: Number(id) || id }, 4000)
       }
       // get_msg 各协议端/配置下 message 可能是数组，也可能是 CQ 码字符串；
       // 只认数组会让「引用」静默变空（旧版就踩过这个坑）。
@@ -915,6 +968,10 @@ export class OneBotChannel {
           summary: String(seg?.data?.summary || ''),
         }))
       const forward = segments.find((seg) => seg?.type === 'forward')
+      if (!text && !images.length && !forward) {
+        const fromHistory = await this.#messageFromHistory(id, options.conversation)
+        if (fromHistory) return fromHistory
+      }
       return {
         ok: true,
         text,
@@ -923,6 +980,8 @@ export class OneBotChannel {
         forwardId: String(forward?.data?.id || forward?.data?.resid || ''),
       }
     } catch (error) {
+      const fromHistory = await this.#messageFromHistory(id, options.conversation)
+      if (fromHistory) return fromHistory
       return { ok: false, text: '', sender: '', images: [], forwardId: '', error: String(error?.message || error) }
     }
   }
@@ -937,17 +996,26 @@ export class OneBotChannel {
     const [scope, id] = String(conversation || '').split(':')
     if (!id || (scope !== 'group' && scope !== 'private')) return []
     const count = Math.max(1, Math.min(100, Number(options.count) || 30))
+    // message_seq 用于“定位到某条旧消息附近”。引用两三天前的图时，
+    // 它早就不在最近 100 条里；带上目标 seq 才能让 NapCat 从那里翻。
+    const seq = options.messageSeq === undefined || options.messageSeq === null
+      ? undefined
+      : Number(options.messageSeq) || String(options.messageSeq)
     const items = []
     try {
       if (scope === 'group') {
-        const data = await this.sendRaw('get_group_msg_history', { group_id: Number(id) || id, count }, 10000)
+        const params = { group_id: Number(id) || id, count }
+        if (seq !== undefined) params.message_seq = seq
+        const data = await this.sendRaw('get_group_msg_history', params, 10000)
         items.push(...(Array.isArray(data) ? data : data?.messages || data?.message || []))
       } else {
         // NapCat 用 get_friend_msg_history；别的实现可能叫 get_private_msg_history
         let data = null
         for (const action of ['get_friend_msg_history', 'get_private_msg_history']) {
           try {
-            data = await this.sendRaw(action, { user_id: Number(id) || id, count }, 10000)
+            const params = { user_id: Number(id) || id, count }
+            if (seq !== undefined) params.message_seq = seq
+            data = await this.sendRaw(action, params, 10000)
             break
           } catch {}
         }
@@ -1092,6 +1160,17 @@ export class OneBotChannel {
     }
   }
 
+  /** 同意/拒绝加群邀请或入群申请；flag 是 OneBot request 事件里的凭据 */
+  async setGroupRequest(flag, approve = true, subType = 'add') {
+    const token = String(flag || '').trim()
+    if (!token) throw new Error('没有入群请求凭据 flag')
+    return this.sendRaw('set_group_add_request', {
+      flag: token,
+      sub_type: String(subType || 'add'),
+      approve: approve === true,
+    }, 10000)
+  }
+
   async leaveGroup(id) {
     await this.sendRaw('set_group_leave', { group_id: Number(id) || id, is_dismiss: false }, 10000)
     return { ok: true }
@@ -1108,6 +1187,27 @@ export class OneBotChannel {
       }
     } catch {
       return { file: '', url: '', base64: '' }
+    }
+  }
+
+  /**
+   * 让 QQ 自己做语音转文字。NapCat 的 fetch_ptt_text 直接调 NTQQ
+   * 的 translatePtt2Text，中文短语音比外部识别器稳，也不用下载音频。
+   */
+  async getVoiceText(messageId) {
+    const id = String(messageId || '').trim()
+    if (!id) return { ok: false, error: '没有语音 message_id' }
+    try {
+      // NapCat 的 fetch_ptt_text 按数字 message_id 查 NTQQ 缓存；
+      // 传字符串形式会直接“获取语音转文字结果失败”。
+      const numeric = Number(id)
+      const data = await this.sendRaw('fetch_ptt_text', {
+        message_id: Number.isFinite(numeric) && numeric > 0 ? numeric : id,
+      }, 20_000)
+      const text = String(data?.text || '').trim()
+      return text ? { ok: true, text } : { ok: false, error: 'QQ 没有返回语音文字' }
+    } catch (error) {
+      return { ok: false, error: String(error?.message || error) }
     }
   }
 
@@ -1184,6 +1284,16 @@ export class OneBotChannel {
       if (after) message.push({ type: 'text', data: { text: after } })
     }
     if (Array.isArray(message) ? message.length === 0 : !String(message).trim()) throw new Error('要发的内容是空的')
+
+    // 引用回复：OneBot 的 reply 段要放在最前面，后面才是正文。
+    // 没有 replyTo 时保持原来的字符串/数组形状，不改变普通发送。
+    const replyTo = String(options.replyTo || '').trim()
+    if (replyTo) {
+      const body = Array.isArray(message)
+        ? message
+        : [{ type: 'text', data: { text: String(message) } }]
+      message = [{ type: 'reply', data: { id: replyTo } }, ...body]
+    }
 
     // 出口去重：**只拦同一轮生成内的重复**。
     //

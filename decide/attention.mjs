@@ -267,6 +267,34 @@ export class AttentionDesk {
     const last = String(this.lastReply.get(key) || '')
     if (!addressesSelf(text) && !textOverlaps(text, last)) return null
 
+    return this.handoff({ conversation: key, from: who, other })
+  }
+
+  /**
+   * 快判据没命中、但旧窗口还热着：这是一次“可能是换人接话”的候选。
+   * 调用方可以拿它去问一次小模型；不要在这里直接关旧窗口——
+   * 判错就是插嘴，必须等判定回来再动账本。
+   */
+  candidate(input = {}) {
+    const key = String(input.conversation || '')
+    const who = String(input.from || '')
+    if (!key || !who) return null
+    if (this.hit(key, who)) return null
+    const other = this.otherTarget(key, who)
+    if (!other) return null
+    const text = String(input.text || '')
+    const lastReply = String(this.lastReply.get(key) || '')
+    // 快判据已经能确定的，不浪费模型调用。
+    if (addressesSelf(text) || textOverlaps(text, lastReply)) return null
+    return { conversation: key, from: who, other, text, lastReply }
+  }
+
+  /** 确认换人：关旧窗、开新窗。只有快判据或模型判定通过后才调用。 */
+  handoff(input = {}) {
+    const key = String(input.conversation || '')
+    const who = String(input.from || '')
+    const other = String(input.other || '')
+    if (!key || !who || !other) return null
     this.close(key, other)
     this.open(key, who)
     this.handoffs += 1

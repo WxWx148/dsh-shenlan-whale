@@ -798,6 +798,18 @@ export class NapCatLogin {
     if (this.platform !== 'win32') return { ok: false, error: 'NapCat 启动只支持 Windows' }
     if (this.starting) return { ok: false, error: '正在启动，别连点' }
     const plan = this.plan(options.mode ? { mode: options.mode } : {})
+    // WebUI 里可能残留上一个机器人的 autoLoginAccount；NapCat 会优先按它
+    // 做快速登录，结果就是“启动成功、登录的却不是当前 selfId”。
+    // 启动前把它对齐到当前机器人号，避免二维码/票据登录到错号。
+    try {
+      const webuiFile = path.join(plan.install, 'napcat', 'config', 'webui.json')
+      const webui = JSON.parse(readFileSync(webuiFile, 'utf8'))
+      if (plan.uin && String(webui.autoLoginAccount || '') !== String(plan.uin)) {
+        webui.autoLoginAccount = String(plan.uin)
+        writeFileSync(webuiFile, JSON.stringify(webui, null, 4) + '\n', 'utf8')
+        this.log('[napcat] 已把 WebUI 自动登录账号对齐到 ' + plan.uin)
+      }
+    } catch {}
     if (!plan.ok) return { ok: false, error: plan.error || plan.installError || '登录方式还不完整' }
     if (!plan.install && !plan.launcherPath) {
       return { ok: false, error: plan.installError || '找不到 NapCat 安装目录' }

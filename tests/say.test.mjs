@@ -85,7 +85,11 @@ await check('QQ：只发一句话，代码/细节/链接都不带', () => {
   const withArtifact = forQq(
     card({ label: '画张图', ms: 900, artifact: { kind: 'image', title: '趋势', bytes: 10_000 }, code: 'x' }),
   )
-  assert.match(withArtifact, /好了，在面板里能看/)
+  assert.match(withArtifact, /在面板里能看/)
+  // 「做好了」只说一次：旧文案是「做好了：画张图 · 0.9 秒。做好了，在面板里能看。」，
+  // 同一句说两遍、两个句号，听起来像系统播报，不像人在说话。
+  assert.equal((withArtifact.match(/做好了/g) || []).length, 0, `重复了：${withArtifact}`)
+  assert.ok(!withArtifact.includes('。'), `聊天里不留句号：${withArtifact}`)
   assert.ok(!withArtifact.includes('趋势.jpg') && !withArtifact.includes('http'), 'QQ 里不该甩本地地址')
 })
 

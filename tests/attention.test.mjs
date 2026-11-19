@@ -166,6 +166,20 @@ await check('过期清理：窗口没了，记着的那句话也一起清掉（�
   assert.equal(desk.lastReply.size, 0, 'lastReply 跟着窗口一起清，否则只进不出')
 })
 
+await check('换人歧义：快判据不成立时先给候选，不提前关旧窗口', () => {
+  const desk = new AttentionDesk({ config: cfg(), now: clock().now })
+  desk.open('group:1', 'A')
+  desk.lastReply.set('group:1', '显卡现在太贵了，等降价')
+  const before = desk.stats()
+  const candidate = desk.candidate({ conversation: 'group:1', from: 'B', text: '今天晚饭吃什么' })
+  assert.equal(candidate.other, 'A')
+  assert.equal(desk.stats().handoffs, before.handoffs, '候选阶段不能动账本')
+  assert.ok(desk.hit('group:1', 'A'), '旧窗口还在')
+  const done = desk.handoff(candidate)
+  assert.equal(done.handoffFrom, 'A')
+  assert.ok(desk.hit('group:1', 'B'), '确认后才换到 B')
+})
+
 await check('换人有记录：面板要能回答「刚才为什么切给了别人」', () => {
   const desk = new AttentionDesk({ config: cfg(), now: clock().now })
   desk.open('group:1', 'A')

@@ -366,9 +366,12 @@ export class TypingDesk {
         // ══════════════════════════════════════════════════════
         const firstFull = typingDelayMs(list[0], model)
         let planned = firstFull
+        // 这条回复前面已经走过连发合并窗口：那段空窗期就是“看到消息、等对方说完、
+        // 想了一下”的时间，不能再在发送前加一遍打字机基础等待，否则两段相加。
+        if (input.noFirstDelay === true) planned = 0
         // 模型已经想了多久。超出一条打字时间的部分，说明它还在想 ——
         // 那部分时间不该算进「打」里，扣掉就行。
-        if (spent > 0) {
+        if (spent > 0 && planned > 0) {
           const saved = Math.min(spent, planned)
           this.savedMs += saved
           planned -= saved

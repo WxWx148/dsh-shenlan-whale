@@ -12,6 +12,7 @@
  *   写操作猜错一次，改的就是用户的真实数据。
  */
 
+import { readFileSync, writeFileSync } from 'node:fs'
 import { failure, failureFrom } from './failure.mjs'
 
 export const ACTION_OPS = Object.freeze([
@@ -20,7 +21,7 @@ export const ACTION_OPS = Object.freeze([
   'memory.forget', 'memory.forgetPerson', 'memory.forgetGroup',
   'reminder.cancel', 'reminder.update',
   'approval.decide', 'approval.forget',
-  'chat.reset', 'qq.send',
+  'chat.reset', 'qq.send', 'qzone.post',
   'skill.forget', 'skill.amend', 'skill.teach', 'skill.set',
   'config.reload',
 ])
@@ -116,6 +117,31 @@ export async function runAction(op, args = {}, ctx = {}) {
         return { ok: true, text: payload }
       } catch (error) {
         return failureFrom(error, 'SEND_FAILED')
+      }
+    }
+
+    case 'qzone.post': {
+      const text = str(args.content).trim()
+      if (!text) return failure('EMPTY_TEXT')
+      if (runtime?.config?.qzone?.enabled !== true) return failure('QZONE_DISABLED')
+      if (!channel || typeof channel.sendQzone !== 'function') return failure('QZONE_NOT_WIRED')
+      if (channel.state() !== 'online') return failure('CHANNEL_OFFLINE')
+      const limit = Math.max(0, Number(runtime.config.qzone.dailyLimit ?? 2) || 0)
+      const file = `${runtime.dir}/qzone-state.json`
+      const day = new Date(at()).toDateString()
+      let state = { day: '', count: 0 }
+      try {
+        state = { ...state, ...JSON.parse(readFileSync(file, 'utf8')) }
+      } catch {}
+      if (state.day !== day) state = { day, count: 0 }
+      if (limit <= 0 || state.count >= limit) return failure('QZONE_LIMIT', { message: `今天已经发过 ${state.count} 条` })
+      try {
+        await channel.sendQzone(text.slice(0, 300), Number(args.ugcRight ?? 1) || 1)
+        writeFileSync(file, JSON.stringify({ day, count: state.count + 1 }) + '\n', 'utf8')
+        runtime.log('qzone_post', { chars: text.length, actor: 'panel' })
+        return { ok: true, text: '说说发出去了：' + text.slice(0, 80) }
+      } catch (error) {
+        return failureFrom(error, 'QZONE_SEND_FAILED')
       }
     }
 

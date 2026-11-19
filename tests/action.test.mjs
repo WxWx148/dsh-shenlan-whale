@@ -77,9 +77,9 @@ const cases = [
 ]
 
 await check('动作清单就是全部实现，一个不多一个不少', () => {
-  assert.equal(ACTION_OPS.length, 21)
-  assert.equal(new Set(ACTION_OPS).size, 21, 'op 不能重名')
-  const covered = new Set([...cases.map((one) => one.op), 'qq.send', 'config.reload'])
+  assert.equal(ACTION_OPS.length, 22)
+  assert.equal(new Set(ACTION_OPS).size, 22, 'op 不能重名')
+  const covered = new Set([...cases.map((one) => one.op), 'qq.send', 'qzone.post', 'config.reload'])
   assert.deepEqual([...ACTION_OPS].sort(), [...covered].sort())
 })
 

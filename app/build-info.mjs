@@ -1,5 +1,5 @@
 /**
- * lib/build-info.mjs — 「现在跑的到底是哪一份代码」。
+ * app/build-info.mjs — 「现在跑的到底是哪一份代码」。
  *
  * 为什么需要它：
  *   宿主加载的不是 `E:\深蓝鲸`，而是 `~/.dsh/profiles/<p>/node_modules/dsh-shenlan-whale`

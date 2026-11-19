@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-08T16:17:35.780Z",
+  "generatedAt": "2026-11-17T22:37:04.627Z",
   "schema": 1,
   "api": {
     "base": "/api/shenlan",
@@ -254,7 +254,7 @@
           "file": "backfill.mjs",
           "path": "channel/backfill.mjs",
           "dir": ".",
-          "lines": 176,
+          "lines": 182,
           "exports": [
             "backfillMissed"
           ],
@@ -290,7 +290,7 @@
           "file": "napcat.mjs",
           "path": "channel/napcat.mjs",
           "dir": ".",
-          "lines": 1188,
+          "lines": 1200,
           "exports": [
             "MODE_LABELS",
             "NapCatLogin",
@@ -312,7 +312,7 @@
           "file": "onebot.mjs",
           "path": "channel/onebot.mjs",
           "dir": ".",
-          "lines": 1284,
+          "lines": 1394,
           "exports": [
             "OneBotChannel",
             "friendlySendError",
@@ -384,7 +384,7 @@
           "file": "say.mjs",
           "path": "voice/say.mjs",
           "dir": ".",
-          "lines": 240,
+          "lines": 247,
           "exports": [
             "artifactNote",
             "askCard",
@@ -401,7 +401,7 @@
           "file": "semantic.mjs",
           "path": "voice/semantic.mjs",
           "dir": ".",
-          "lines": 223,
+          "lines": 233,
           "exports": [
             "STICKY",
             "canStart",
@@ -415,7 +415,7 @@
           "file": "style.mjs",
           "path": "voice/style.mjs",
           "dir": ".",
-          "lines": 285,
+          "lines": 327,
           "exports": [
             "STYLE_PROFILE",
             "hardWrap",
@@ -428,7 +428,7 @@
           "file": "typing.mjs",
           "path": "voice/typing.mjs",
           "dir": ".",
-          "lines": 436,
+          "lines": 439,
           "exports": [
             "TYPING",
             "TypingDesk",
@@ -521,7 +521,7 @@
           "file": "usage.mjs",
           "path": "facts/usage.mjs",
           "dir": ".",
-          "lines": 463,
+          "lines": 480,
           "exports": [
             "USAGE_SOURCES",
             "Usage",
@@ -560,7 +560,7 @@
           "file": "attention.mjs",
           "path": "decide/attention.mjs",
           "dir": ".",
-          "lines": 342,
+          "lines": 370,
           "exports": [
             "ATTENTION",
             "AttentionDesk",
@@ -573,7 +573,7 @@
           "file": "behavior.mjs",
           "path": "decide/behavior.mjs",
           "dir": ".",
-          "lines": 220,
+          "lines": 225,
           "exports": [
             "BEHAVIOR",
             "BEHAVIOR_LIST",
@@ -587,10 +587,11 @@
           "file": "burst.mjs",
           "path": "decide/burst.mjs",
           "dir": ".",
-          "lines": 276,
+          "lines": 291,
           "exports": [
             "BurstLedger",
             "DEFAULT_MERGE_WINDOW_MS",
+            "INCOMPLETE_MERGE_WINDOW_MS",
             "MAX_MERGED",
             "mergeTexts"
           ],
@@ -615,7 +616,7 @@
           "file": "dedupe.mjs",
           "path": "decide/dedupe.mjs",
           "dir": ".",
-          "lines": 265,
+          "lines": 267,
           "exports": [
             "DUP_MSG_MS",
             "DUP_TEXT_MS",
@@ -629,7 +630,7 @@
           "file": "guard.mjs",
           "path": "decide/guard.mjs",
           "dir": ".",
-          "lines": 265,
+          "lines": 289,
           "exports": [
             "Guard",
             "MIN_DELAY_MS"
@@ -746,14 +747,16 @@
           "file": "index.mjs",
           "path": "turn/index.mjs",
           "dir": ".",
-          "lines": 2415,
+          "lines": 2832,
           "exports": [
             "Turn",
             "buildPrompt",
             "needsFullTools",
+            "normalizeVoiceWav",
             "parseToolCall",
             "parseToolCalls",
             "splitReply",
+            "stripToolMarks",
             "toolResultDigest"
           ],
           "via": "import"
@@ -763,9 +766,11 @@
         "Turn",
         "buildPrompt",
         "needsFullTools",
+        "normalizeVoiceWav",
         "parseToolCall",
         "parseToolCalls",
         "splitReply",
+        "stripToolMarks",
         "toolResultDigest"
       ]
     },
@@ -884,7 +889,7 @@
           "file": "learn/habits.mjs",
           "path": "mind/learn/habits.mjs",
           "dir": "learn",
-          "lines": 385,
+          "lines": 388,
           "exports": [
             "HabitObserver",
             "gapLines",
@@ -1180,7 +1185,7 @@
           "file": "skill.mjs",
           "path": "ability/skill.mjs",
           "dir": ".",
-          "lines": 939,
+          "lines": 946,
           "exports": [
             "CATALOG",
             "LIMITS",
@@ -1226,7 +1231,7 @@
           "file": "tools.mjs",
           "path": "ability/tools.mjs",
           "dir": ".",
-          "lines": 1944,
+          "lines": 2026,
           "exports": [
             "calc",
             "createTools",
@@ -1238,7 +1243,7 @@
           "file": "web.mjs",
           "path": "ability/web.mjs",
           "dir": ".",
-          "lines": 457,
+          "lines": 461,
           "exports": [
             "checkNet",
             "configureNet",
@@ -1483,7 +1488,7 @@
           "file": "panel-view.mjs",
           "path": "view/panel-view.mjs",
           "dir": ".",
-          "lines": 2325,
+          "lines": 2386,
           "exports": [
             "CARD_PARTS",
             "PAGE_CARDS",
@@ -1581,7 +1586,7 @@
           "file": "config.mjs",
           "path": "truth/config.mjs",
           "dir": ".",
-          "lines": 418,
+          "lines": 428,
           "exports": [
             "DEFAULTS",
             "applyInto",
@@ -1675,7 +1680,7 @@
           "file": "panel.mjs",
           "path": "truth/panel.mjs",
           "dir": ".",
-          "lines": 652,
+          "lines": 658,
           "exports": [
             "LEVEL",
             "PANEL_GROUPS",
@@ -1782,7 +1787,7 @@
           "file": "action.mjs",
           "path": "app/action.mjs",
           "dir": ".",
-          "lines": 163,
+          "lines": 189,
           "exports": [
             "ACTION_OPS",
             "runAction"
@@ -1818,7 +1823,7 @@
           "file": "chat.mjs",
           "path": "app/chat.mjs",
           "dir": ".",
-          "lines": 308,
+          "lines": 311,
           "exports": [
             "Chat"
           ],
@@ -1942,7 +1947,7 @@
         "file": "client.panel.js",
         "path": "lib/client.panel.js",
         "dir": ".",
-        "lines": 3570,
+        "lines": 3584,
         "exports": [],
         "via": "regex"
       },
@@ -1950,7 +1955,7 @@
         "file": "rules.mjs",
         "path": "lib/rules.mjs",
         "dir": ".",
-        "lines": 339,
+        "lines": 315,
         "exports": [
           "GAPS",
           "RULES",
@@ -1966,11 +1971,11 @@
     "parentsLanded": 12,
     "parentsPlanned": 0,
     "files": 76,
-    "lines": 32782,
+    "lines": 33889,
     "pages": 7,
     "routes": 14,
     "flatModules": 2,
-    "exports": 343
+    "exports": 345
   },
   "problems": []
 }

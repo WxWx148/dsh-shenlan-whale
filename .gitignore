@@ -9,7 +9,20 @@ sandbox/
 # 坏文件留的原件（lib/core.mjs 会生成 *.bad-<时间>）
 *.bad-*
 
+# 发布产物与本地归档
+dist/
+*.tgz
+_archive/
+.five-shot/
+
 # 系统与编辑器
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
 *.log
+
+# 本地临时恢复目录（可能含会话日志）
+.tmp-recover/
+.tmp-*/
+

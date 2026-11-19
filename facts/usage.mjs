@@ -128,7 +128,10 @@ export class Usage {
     if (this.data.days[key]) return
     try {
       const since = this.#dayStart(this.now())
-      const rows = this.journal.read({ limit: 1000 }).rows.filter((row) => row?.kind === 'usage' && Number(row?.at || 0) >= since)
+      // 以前这里是 `read({ limit: 1000 })`：Journal.read 内部把上限夹到 500，
+      // 而且返回的是「最新 500 行所有类型」—— 噪音一多，当天的账大半在外面，
+      // 迁移出来的数字比真实花费少，还会被写进 days 与累计账，从此对不上。
+      const rows = this.#usageRowsSince(since)
       if (!rows.length) return
       const sum = this.#sum(rows, this.now())
       this.data.days[key] = { input: sum.input, output: sum.output, calls: sum.calls, cost: sum.cost, sources: sum.sources }
@@ -297,9 +300,20 @@ export class Usage {
     // 有账本就**只**按账本算，今天没记过账就是 0。
     // 早先这里在「今天没记录」时退回了内存累计，于是把昨天的钱算进了今天 ——
     // 用户看到的是「今天还没说话就已经花了 1 块」，而这种错很难被发现。
-    //
-    // 分页最多翻 4 页（每页 500）：一天超过 2000 次调用时统计会偏少。
-    // 这是已知上限，写在这里而不是假装没有；真到那个量级，面板显示的已是下限。
+    return this.#sum(this.#usageRowsSince(since), at)
+  }
+
+  /**
+   * 从审计里翻出 `since` 之后的用量行。
+   *
+   * 分页最多翻 4 页（每页 500）：一天超过 2000 次调用时统计会偏少。
+   * 这是已知上限，写在这里而不是假装没有；真到那个量级，面板显示的已是下限。
+   *
+   * 这段只写一次：`today()` 与启动时的 `#seedFromJournal()` 都要它。
+   * 以前两处各写一份（一份还写了 `limit: 1000` 而内部夹到 500），
+   * 于是「同一个今天」在两个地方算出两个数。
+   */
+  #usageRowsSince(since) {
     let rows = []
     let before = undefined
     for (let page = 0; page < 4; page += 1) {
@@ -307,10 +321,13 @@ export class Usage {
       rows = rows.concat(slice.rows)
       if (!slice.hasMore || !slice.nextBefore) break
       const oldest = slice.rows[slice.rows.length - 1]
-      if (!oldest || Number(oldest?.at || 0) < since) break
+      // 判「这一页有没有翻到今天以前」必须看 ts：每一行都有 ts，
+      // 而 at 只有 usage 行才有。用 at 的话，页尾只要是一条 channel_state
+      // 就会变成 `0 < since`，第一页当场停 —— 今天确实花了钱也显示 0。
+      if (!oldest || Number(oldest?.ts ?? oldest?.at ?? 0) < since) break
       before = slice.nextBefore
     }
-    return this.#sum(rows.filter((row) => row?.kind === 'usage' && Number(row?.at || 0) >= since), at)
+    return rows.filter((row) => row?.kind === 'usage' && Number(row?.at || 0) >= since)
   }
 
   #fromMemory() {

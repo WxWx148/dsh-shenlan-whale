@@ -209,6 +209,7 @@ function pageOf(html, target, maxChars = 3500) {
 export function normalizeQuery(query) {
   const original = String(query || '').trim()
   let out = original
+    .replace(/^(帮我|请|麻烦|你)?\s*(谷歌|google)\s*(?:(?:搜|查|找)(?:一下)?|一下)?\s*/i, '')
     .replace(/^(帮我|请|麻烦|你)?\s*(搜一下|搜索一下|搜索|查一下|查找|查查|看看|找一下|找找)\s*/i, '')
     .replace(/[，。！？!?；;]+$/g, '')
     .trim()
@@ -260,7 +261,8 @@ function decodeBingUrl(href) {
 
 async function searchGoogle(q, limit = 5) {
   try {
-    const html = await proxyText('https://www.google.com/search?q=' + encodeURIComponent(q) + '&hl=zh-CN&num=' + Math.max(3, Number(limit) || 5), 12000)
+    // gbv=1 让 Google 返回基础 HTML，避免只拿到 JS 空壳；仍然是同一套结果页。
+    const html = await proxyText('https://www.google.com/search?q=' + encodeURIComponent(q) + '&hl=zh-CN&gbv=1&num=' + Math.max(3, Number(limit) || 5), 12000)
     if (!html) return []
     const out = []
     const seen = new Set()
@@ -422,9 +424,11 @@ export async function searchWebDetailed(query, limit = 5) {
   // 搜索引擎的目标域名由代码写死，但「能不能用」按白名单来：
   // 界面里点开 cn.bing.com，Bing 这一路才真的会发请求。
   const providers = [
+    // 用户要求优先谷歌：先走 Google，再走免注册增强源和国内源兜底。
+    // Google 被墙/要验证码时只是返回空，不会阻断后面的源。
+    { host: 'www.google.com', run: searchGoogle },
     // 免注册增强源：不算「用户要访问的站点」，只要联网没被总关就允许。
     { host: 'api.keenable.ai', run: searchKeenable, free: true },
-    { host: 'www.google.com', run: searchGoogle },
     { host: 'quark.sm.cn', run: searchBrowserQuark },
     { host: 'quark.sm.cn', run: searchQuark },
     { host: 'www.baidu.com', run: searchBaidu },

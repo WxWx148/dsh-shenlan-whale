@@ -1,5 +1,5 @@
 /**
- * lib/failure.mjs — 接口错误体的唯一定义。
+ * app/failure.mjs — 接口错误体的唯一定义。
  *
  * 形状（**error 永远是字符串**）：
  *

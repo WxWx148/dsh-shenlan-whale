@@ -137,6 +137,11 @@ export function route(event, ctx = {}) {
       return { behavior: BEHAVIOR.ADMIN, trigger: 'owner_command', reason: `主人让做：${command}` }
     }
     if (event.scope === SCOPE.PRIVATE) return { behavior: BEHAVIOR.REPLY, trigger: 'private', reason: '私聊' }
+    // 主人在群里说「闭嘴 / 恢复说话」是控制指令，不一定 @；
+    // 不在这里放行，后面的静音检查会先执行，指令永远到不了处理分支。
+    if (has(event, TAG.IS_OWNER) && /^(?:(?:这个|本|全)?群(?:里)?\s*)?(?:(?:确认)?(?:退出群聊|退出群|退群)\s*\d+|(?:闭嘴|安静|安静点|消停点|先别说了|恢复说话|解除静音|不用安静了|出来吧|可以说话了))(?:[，,\s]|$)/.test(String(event.payload?.text || '').trim())) {
+      return { behavior: BEHAVIOR.REPLY, trigger: 'owner_group_control', reason: '主人在群里下的静音/恢复指令' }
+    }
     if (has(event, TAG.AT_ME)) return { behavior: BEHAVIOR.REPLY, trigger: 'at_me', reason: '被 @ 了' }
     // @ 了别人 = 这句话的对象不是它。即使还在 follow-up 窗口、或正文里出现
     // 「你/名字」，也不该把别人的对话接到自己身上。

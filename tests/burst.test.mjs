@@ -141,6 +141,7 @@ await check('连发：一个人连着发三条 → 只回一次，一次把三�
   await turn.handle(raw({ text: '说句话呀', atMe: true }))
   await settle()
   assert.equal(ctx.sent.length, 0, '窗口没到之前不该回（真人会等对方说完）')
+  assert.equal(prompts.length, 0, '窗口没到之前也不该开始想 —— 否则下半句来晚了已经来不及')
 
   timers.flush()
   await settle(120)
@@ -203,18 +204,19 @@ await check('连发：窗口开着时又来一条 → 并进去，不会各回�
   assert.match(prompts[0], /第二条/)
 })
 
-await check('连发：私聊不合并（主人一条条问，每条都要单独答）', async () => {
+await check('连发：私聊也合并，主人拆两条当一条答', async () => {
   const ctx = open()
   const timers = manualTimers()
   const { turn, prompts } = makeTurn(ctx, timers)
 
-  await turn.handle(raw({ scope: SCOPE.PRIVATE, text: '在吗' }))
-  await turn.handle(raw({ scope: SCOPE.PRIVATE, text: '在吗' }))
+  await turn.handle(raw({ scope: SCOPE.PRIVATE, text: '你现在是不是把一句话' }))
+  await turn.handle(raw({ scope: SCOPE.PRIVATE, text: '拆成两条回我' }))
   timers.flush()
   await settle(120)
 
-  assert.equal(ctx.sent.length, 2, '私聊要逐条答 —— 攒着不答像怠慢')
-  assert.equal(prompts.length, 2, '私聊要逐条想')
+  assert.equal(ctx.sent.length, 1, '拆开的两条要当一句回，不能每条都硬回')
+  assert.equal(prompts.length, 1, '同一段话只想一次')
+  assert.match(prompts[0], /拆成两条回我/)
 })
 
 await check('连发：窗口是 0 就等于关掉合并', async () => {

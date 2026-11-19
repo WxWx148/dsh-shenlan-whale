@@ -148,6 +148,18 @@ await check('临时静音：非主人被挡，主人照常，解除后恢复', (
   assert.equal(guard.check(BASE + 120_000).ok, true)
 })
 
+await check('群级静音：只停这个群，主人也停；私聊和别的群不受影响', () => {
+  const guard = new Guard({ config: { ...cfg(), identity: { ownerId: '10001' } }, now: () => BASE })
+  guard.mute(30, BASE, 'group:111')
+  const group = guard.check(BASE + 60_000, { event: { scope: 'group', conversation: 'group:111', from: '10001' } })
+  assert.equal(group.ok, false, '群里说闭嘴后，主人再说话也不该让机器人接')
+  assert.equal(group.why, 'muted')
+  assert.equal(guard.check(BASE + 60_000, { event: { scope: 'group', conversation: 'group:222', from: '20002' } }).ok, true)
+  assert.equal(guard.check(BASE + 60_000, { event: { scope: 'private', conversation: 'private:10001', from: '10001' } }).ok, true, '主人私聊不受群静音影响')
+  guard.unmute('group:111')
+  assert.equal(guard.check(BASE + 120_000, { event: { scope: 'group', conversation: 'group:111', from: '20002' } }).ok, true)
+})
+
 // ── 主人与额度 ─────────────────────────────────────────────────
 // 这一组是对一次真实事故的回归：跟机器人聊得密了一阵之后，它突然一条都不回，
 // 通道在线、消息收得到、日志里躺着 `per_hour`，但人只看得见沉默 —— 只能靠重启绕过。

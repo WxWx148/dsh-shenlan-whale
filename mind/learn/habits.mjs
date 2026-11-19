@@ -230,7 +230,10 @@ export function gapLines(gapList, context = {}) {
     if (gap.kind === 'not_short_enough') {
       lines.push(`该短的时候要短得下去 —— ${who} ≤6 字的占 ${Math.round(gap.wantShort * 100)}%，你只占 ${Math.round(gap.nowShort * 100)}%；长短看语境，别一句都写满`)
     } else if (gap.kind === 'too_comma') {
-      lines.push(`你逗号用得比${who}多 ${gap.gap} 个点，少用逗号，靠换行断气`)
+      // 旧文案是「少用逗号，靠换行断气」：逗号压下去之后，模型改拿空格当停顿
+      // （实测 36% 的回复这样发，真人 1.4%），中文里那是机器腔。
+      // 现在只说清楚该改什么：停顿仍写逗号，别用空格，也别把换行当逗号使。
+      lines.push(`你逗号用得比${who}多 ${gap.gap} 个点，逗号别堆成一串；停顿还是写逗号，别拿空格顶，换行只在换话题时用`)
     } else if (gap.kind === 'too_particle') {
       lines.push(`你语气词比${who}多 ${gap.gap} 个点，别句句都带`)
     } else if (gap.kind === 'no_question') {
